@@ -10,9 +10,9 @@ Devlog Studio turns daily progress on a software project into devlog videos: ver
 
 [![Watch "Rain changes everything", a devlog video made with Devlog Studio, on YouTube](docs/screenshots/video-poster.jpg)](https://youtu.be/0AxgHBwaNzI)
 
-![The calendar with suggestions for each work day, and the selected day's suggestions beside it](docs/screenshots/calendar.png)
-
 The video and screenshots show Grand Prompt Auto, a game invented for this README. Its images, activity and statistics are made up.
+
+![The calendar with suggestions for each work day, and the selected day's suggestions beside it](docs/screenshots/calendar.png)
 
 Each project has a type: game, web app, mobile app or something else. The type sets the default prompt text that tells the agent who it writes for and which shots work well. You can edit that text in the project settings and restore the default at any time.
 
