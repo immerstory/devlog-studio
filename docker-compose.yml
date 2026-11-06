@@ -1,0 +1,38 @@
+name: devlog-studio
+
+# Persistence for Devlog Studio. The app itself runs on the host, next to the signed-in agent CLIs,
+# the project's working copies and any local capture tools.
+# Run `npm run setup` once; it writes docker/garage.toml and .env, then starts these services.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: devlog
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run npm run setup}
+      POSTGRES_DB: devlog
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5544}:5432"
+    volumes:
+      - pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devlog -d devlog"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  garage:
+    image: dxflrs/garage:v2.0.0
+    command: ["/garage", "-c", "/etc/garage.toml", "server"]
+    ports:
+      - "127.0.0.1:${S3_PORT:-3940}:3900"
+    volumes:
+      - ./docker/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    restart: unless-stopped
+
+volumes:
+  pg:
+  garage-meta:
+  garage-data:

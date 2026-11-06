@@ -1,0 +1,49 @@
+{
+  "port": 4777,
+  "gameTitle": "",
+  "unity": {
+    "projectPath": "",
+    "mcp": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "headerHelper": "",
+      "headerHelperArgs": []
+    }
+  },
+  "agent": {
+    "default": "claude",
+    "claude": { "executable": "claude" },
+    "codex": {
+      "executable": "codex",
+      "args": []
+    },
+    "timeoutMinutes": 20,
+    "scriptReview": true
+  },
+  "discovery": {
+    "initialDays": 7,
+    "contentGlobs": ["*.unity", "*.prefab", "*.terrainlayer", "*.asset", "*.mat"]
+  },
+  "elevenlabs": {
+    "voiceId": "",
+    "modelId": "eleven_v4",
+    "stability": 0.45,
+    "similarityBoost": 0.8,
+    "style": 0.15,
+    "speed": 1.0
+  },
+  "render": { "fps": 30, "draftScale": 0.5 },
+  "publishing": { "attribution": "" },
+  "youtube": {
+    "clientId": "",
+    "publishTime": "17:00",
+    "privacyWithoutDate": "public",
+    "categoryId": "20",
+    "madeForKids": false,
+    "containsSyntheticMedia": false,
+    "uploadCaptions": true,
+    "statsIntervalHours": 3
+  },
+  "theme": {
+    "backgroundMaterialIds": []
+  }
+}

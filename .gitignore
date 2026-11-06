@@ -1,0 +1,7 @@
+node_modules/
+output/
+cache/
+.env
+docker/garage.toml
+extensions/*
+!extensions/README.md

@@ -1,0 +1,398 @@
+{
+ "portrait-narrated": {
+  "durationInFrames": 409,
+  "segments": [
+   {
+    "id": "seg-one",
+    "from": 0,
+    "durationInFrames": 83,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "Opening"
+    },
+    "audio": [
+     {
+      "src": "http://localhost:4777/media/tts/seg-one.mp3?v=11",
+      "startFrame": 0
+     }
+    ]
+   },
+   {
+    "id": "seg-two",
+    "from": 83,
+    "durationInFrames": 143,
+    "onScreen": "Label",
+    "visual": {
+     "type": "capture",
+     "description": "A screen"
+    },
+    "audio": [
+     {
+      "src": "http://localhost:4777/media/tts/seg-two.mp3?v=22",
+      "startFrame": 0
+     }
+    ]
+   },
+   {
+    "id": "seg-silent",
+    "from": 226,
+    "durationInFrames": 78,
+    "visual": {
+     "type": "slide",
+     "layout": "bullets",
+     "heading": "Silent",
+     "bullets": [
+      "One"
+     ]
+    }
+   },
+   {
+    "id": "seg-three",
+    "from": 304,
+    "durationInFrames": 105,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "End"
+    },
+    "audio": [
+     {
+      "src": "http://localhost:4777/media/tts/seg-three.mp3?v=33",
+      "startFrame": 0
+     }
+    ]
+   }
+  ],
+  "captions": [
+   {
+    "text": "Drafts became pages,",
+    "startMs": 150,
+    "endMs": 1080
+   },
+   {
+    "text": "in about a",
+    "startMs": 1080,
+    "endMs": 2010
+   },
+   {
+    "text": "day.",
+    "startMs": 2010,
+    "endMs": 2280
+   },
+   {
+    "text": "Far too many",
+    "startMs": 2900,
+    "endMs": 3740
+   },
+   {
+    "text": "to write alone.",
+    "startMs": 3740,
+    "endMs": 4580
+   },
+   {
+    "text": "So I asked",
+    "startMs": 4580,
+    "endMs": 5420
+   },
+   {
+    "text": "for help,",
+    "startMs": 5420,
+    "endMs": 5980
+   },
+   {
+    "text": "and it mostly",
+    "startMs": 5980,
+    "endMs": 6820
+   },
+   {
+    "text": "worked.",
+    "startMs": 6820,
+    "endMs": 7060
+   },
+   {
+    "text": "Follow along.",
+    "startMs": 10280,
+    "endMs": 11040
+   }
+  ]
+ },
+ "portrait-estimated": {
+  "durationInFrames": 468,
+  "segments": [
+   {
+    "id": "seg-one",
+    "from": 0,
+    "durationInFrames": 97,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "Opening"
+    }
+   },
+   {
+    "id": "seg-two",
+    "from": 97,
+    "durationInFrames": 188,
+    "onScreen": "Label",
+    "visual": {
+     "type": "capture",
+     "description": "A screen"
+    }
+   },
+   {
+    "id": "seg-silent",
+    "from": 285,
+    "durationInFrames": 78,
+    "visual": {
+     "type": "slide",
+     "layout": "bullets",
+     "heading": "Silent",
+     "bullets": [
+      "One"
+     ]
+    }
+   },
+   {
+    "id": "seg-three",
+    "from": 363,
+    "durationInFrames": 105,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "End"
+    }
+   }
+  ],
+  "captions": [
+   {
+    "text": "Drafts became pages,",
+    "startMs": 150,
+    "endMs": 1614
+   },
+   {
+    "text": "in about a",
+    "startMs": 1614,
+    "endMs": 2580
+   },
+   {
+    "text": "day.",
+    "startMs": 2580,
+    "endMs": 2876
+   },
+   {
+    "text": "Far too many",
+    "startMs": 3376,
+    "endMs": 4426
+   },
+   {
+    "text": "to write alone.",
+    "startMs": 4426,
+    "endMs": 5520
+   },
+   {
+    "text": "So I asked",
+    "startMs": 5840,
+    "endMs": 6806
+   },
+   {
+    "text": "for help,",
+    "startMs": 6806,
+    "endMs": 7640
+   },
+   {
+    "text": "and it mostly",
+    "startMs": 7640,
+    "endMs": 8732
+   },
+   {
+    "text": "worked.",
+    "startMs": 8732,
+    "endMs": 9154
+   },
+   {
+    "text": "Follow along.",
+    "startMs": 12254,
+    "endMs": 13096
+   }
+  ]
+ },
+ "landscape-narrated": {
+  "durationInFrames": 409,
+  "segments": [
+   {
+    "id": "seg-one",
+    "from": 0,
+    "durationInFrames": 83,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "Opening"
+    },
+    "audio": [
+     {
+      "src": "http://localhost:4777/media/tts/seg-one.mp3?v=11",
+      "startFrame": 0
+     }
+    ]
+   },
+   {
+    "id": "seg-two",
+    "from": 83,
+    "durationInFrames": 143,
+    "onScreen": "Label",
+    "visual": {
+     "type": "capture",
+     "description": "A screen"
+    },
+    "audio": [
+     {
+      "src": "http://localhost:4777/media/tts/seg-two.mp3?v=22",
+      "startFrame": 0
+     }
+    ]
+   },
+   {
+    "id": "seg-silent",
+    "from": 226,
+    "durationInFrames": 78,
+    "visual": {
+     "type": "slide",
+     "layout": "bullets",
+     "heading": "Silent",
+     "bullets": [
+      "One"
+     ]
+    }
+   },
+   {
+    "id": "seg-three",
+    "from": 304,
+    "durationInFrames": 105,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "End"
+    },
+    "audio": [
+     {
+      "src": "http://localhost:4777/media/tts/seg-three.mp3?v=33",
+      "startFrame": 0
+     }
+    ]
+   }
+  ],
+  "captions": [
+   {
+    "text": "Drafts became pages,",
+    "startMs": 150,
+    "endMs": 1080
+   },
+   {
+    "text": "in about a day.",
+    "startMs": 1080,
+    "endMs": 2280
+   },
+   {
+    "text": "Far too many to write alone.",
+    "startMs": 2900,
+    "endMs": 4580
+   },
+   {
+    "text": "So I asked for help,",
+    "startMs": 4580,
+    "endMs": 5980
+   },
+   {
+    "text": "and it mostly worked.",
+    "startMs": 5980,
+    "endMs": 7060
+   },
+   {
+    "text": "Follow along.",
+    "startMs": 10280,
+    "endMs": 11040
+   }
+  ]
+ },
+ "landscape-estimated": {
+  "durationInFrames": 468,
+  "segments": [
+   {
+    "id": "seg-one",
+    "from": 0,
+    "durationInFrames": 97,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "Opening"
+    }
+   },
+   {
+    "id": "seg-two",
+    "from": 97,
+    "durationInFrames": 188,
+    "onScreen": "Label",
+    "visual": {
+     "type": "capture",
+     "description": "A screen"
+    }
+   },
+   {
+    "id": "seg-silent",
+    "from": 285,
+    "durationInFrames": 78,
+    "visual": {
+     "type": "slide",
+     "layout": "bullets",
+     "heading": "Silent",
+     "bullets": [
+      "One"
+     ]
+    }
+   },
+   {
+    "id": "seg-three",
+    "from": 363,
+    "durationInFrames": 105,
+    "visual": {
+     "type": "slide",
+     "layout": "title",
+     "heading": "End"
+    }
+   }
+  ],
+  "captions": [
+   {
+    "text": "Drafts became pages,",
+    "startMs": 150,
+    "endMs": 1614
+   },
+   {
+    "text": "in about a day.",
+    "startMs": 1614,
+    "endMs": 2876
+   },
+   {
+    "text": "Far too many to write alone.",
+    "startMs": 3376,
+    "endMs": 5520
+   },
+   {
+    "text": "So I asked for help,",
+    "startMs": 5840,
+    "endMs": 7640
+   },
+   {
+    "text": "and it mostly worked.",
+    "startMs": 7640,
+    "endMs": 9154
+   },
+   {
+    "text": "Follow along.",
+    "startMs": 12254,
+    "endMs": 13096
+   }
+  ]
+ }
+}
