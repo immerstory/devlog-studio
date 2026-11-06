@@ -8,9 +8,11 @@ Clone https://github.com/immerstory/devlog-studio.git, follow the Requirements a
 
 Devlog Studio turns daily progress on a software project into devlog videos: vertical shorts (9:16) and landscape YouTube videos (16:9). It reads the project's Git history, uncommitted content files, your notes and your uploaded screenshots and videos, proposes topics on a calendar, and asks you what to highlight. It then writes a script, captures shots in a browser or the open Unity editor and renders an MP4 with subtitles and ElevenLabs narration.
 
+[![Watch "Rain changes everything", a devlog video made with Devlog Studio, on YouTube](docs/screenshots/video-poster.jpg)](https://youtu.be/0AxgHBwaNzI)
+
 ![The calendar with suggestions for each work day, and the selected day's suggestions beside it](docs/screenshots/calendar.png)
 
-The screenshots show Grand Prompt Auto, a game invented for this README. Its images, activity and statistics are made up.
+The video and screenshots show Grand Prompt Auto, a game invented for this README. Its images, activity and statistics are made up.
 
 Each project has a type: game, web app, mobile app or something else. The type sets the default prompt text that tells the agent who it writes for and which shots work well. You can edit that text in the project settings and restore the default at any time.
 
