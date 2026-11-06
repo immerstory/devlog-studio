@@ -8,6 +8,10 @@ Clone https://github.com/immerstory/devlog-studio.git, follow the Requirements a
 
 Devlog Studio turns daily progress on a software project into devlog videos: vertical shorts (9:16) and landscape YouTube videos (16:9). It reads the project's Git history, uncommitted content files, your notes and your uploaded screenshots and videos, proposes topics on a calendar, and asks you what to highlight. It then writes a script, captures shots in a browser or the open Unity editor and renders an MP4 with subtitles and ElevenLabs narration.
 
+![The calendar with suggestions for each work day, and the selected day's suggestions beside it](docs/screenshots/calendar.png)
+
+The screenshots show Grand Prompt Auto, a game invented for this README. Its images, activity and statistics are made up.
+
 Each project has a type: game, web app, mobile app or something else. The type sets the default prompt text that tells the agent who it writes for and which shots work well. You can edit that text in the project settings and restore the default at any time.
 
 ## Requirements
@@ -37,6 +41,9 @@ Agents run through the signed-in CLIs, so they use your Claude or ChatGPT subscr
 Long work (progress checks, backfills, questions, scripts, captures, narration, renders, uploads) runs on the server as a task. While a task runs, a floating task box at the bottom right shows it with its latest log line; click a task to see its full log. **Cancel** stops a task at its next step: a capture after the current shot or frame, an agent run, a render or an upload at once. Work already finished, such as shots captured before the cancel, is kept. You can keep working anywhere in the app meanwhile, and when a task finishes, the page of its project shows the results. Finished tasks stay listed for two minutes, failed ones until you hide them. Tasks live in the server's memory: restarting the server stops running tasks, and the task box reports them as stopped.
 
 1. **Add materials.** On **Materials**, upload screenshots and videos with the date they show, a title, tags and an annotation: the story behind them, such as an experiment, an abandoned version or a bug. Materials appear on the calendar on their date. Image materials can also serve as slide backgrounds; they are used in turn and blurred. Without any, slides use blurred captures from the video itself. Choose them in the project's theme (see **Theme** below).
+
+   ![The Materials page with uploaded screenshots, their dates, titles, annotations and tags](docs/screenshots/materials.png)
+
 2. **Fill the calendar.**
    - **Backfill history** proposes suggestions for a past date range. It runs one agent call per week of commits, notes and materials, and dates each suggestion on the day the work happened. Processed weeks are remembered and skipped unless you select **re-run processed weeks**. Backfill does not change the progress-check state.
    - **Sidebar.** The first group is about the selected day: **Suggestions** lists its suggestions, **Activity** its notes, commits and materials (day cells show commit and material counts; a dot marks a note).
@@ -46,6 +53,9 @@ Long work (progress checks, backfills, questions, scripts, captures, narration, 
 3. **Triage.** Use **Calendar** to see suggestions by work date or publish plan. Use **Triage list** to filter by status, kind, appeal, date or text. Select suggestions to approve, dismiss, restore, merge or schedule them together, or to create a video. Open a suggestion to edit it and to attach or upload materials.
 4. **Questions.** The post's suggestions appear as **Topics**, with all their fields; edit them there before the agent researches. Attach more materials to the video if needed. The agent reads the topics, annotations and preview images, researches the repository and asks up to six questions. **Back to suggestions…** in the post's header deletes the post with its questions, scripts, captures and renders, and returns its suggestions to the approved list. Final videos in `output/` stay. A post with a video on YouTube can't be turned back.
 5. **Script & shots.** The agent writes narration and a shot list for each format. Every segment shows one of these visuals:
+
+   ![A post's script, with narration, on-screen text and a chosen material for each segment](docs/screenshots/post.png)
+
    - **Editor shot:** a camera render from the open editor. A target object is framed automatically, and an occlusion check keeps walls out of the way. Optional camera moves are orbit (swing around the shot's centre), push (move toward it), pan (slide sideways, still looking ahead), turn (swivel on the spot) and rise (move up). Orbit, pan and turn are centred on your framing: an orbit of 40° starts 20° to one side and ends 20° to the other. Choose the target with **Pick object…** (search by name or browse the hierarchy of all loaded scenes) or **Use Unity selection** (the object selected in Unity). Paths add an index such as `[1]` when siblings share a name. To frame a shot yourself, set up the Scene view in Unity, then select **Use Scene view**. The first surface in the middle of the view becomes the shot's centre for push and orbit; the shot shows which object it lies on and how far away it is.
    - **Webpage shot:** a page filmed in headless Chrome, for a project with a browser capture target (**Project settings > Capture targets > Add browser target**, with an optional base URL so shots can use paths such as `/pricing`). The page scrolls from one position to another and can zoom in on a focus point; positions are pixels from the top or a CSS selector such as `#features`, which is brought to the top of the view. By default the move spans the whole shot with a smooth start and stop; **Start after** holds the page still for some seconds first, **Speed** sets the scroll speed in pixels per second (a scroll too long for the shot stops partway, and the task log says so), and **Movement** switches to a constant speed. Zoom follows the same timing. The page is shown on a phone or a desktop viewport (by default a phone for Shorts and a desktop for landscape videos). Its own animations, transitions and videos play at their real speed, because page time advances exactly one frame per filmed frame. **Hide** takes CSS selectors of elements to remove first, such as cookie banners. **CSS for this shot** adds your own CSS to the page after it loads, and the browser target's **CSS for every page** does the same for all its shots; the shot's CSS comes last, so it can override the target's. Pages that need a sign-in can't be filmed yet. Many search engines and some other sites answer automated browsers with a bot check; the shot then fails right away with the site's response (for example HTTP 429 and a CAPTCHA page). For those, record the page yourself and upload it as a material. The browser target's **User agent** setting replaces the browser's own one; empty uses Chrome's for desktop shots and an iPhone Safari one for phone shots. **Request headers** are sent with every request, one `Name: value` per line. By default they are the privacy signals `DNT: 1` (Do Not Track) and `Sec-GPC: 1` (Global Privacy Control), which the page's scripts also see; an empty list sends none. The browser is Chrome headless shell, which the app downloads on the first webpage shot.
    - **Material:** an uploaded screenshot or video. If the footage does not exist yet, the segment describes what to record; upload it and choose it in the segment.
@@ -207,13 +217,19 @@ YouTube allows 100 uploads per day per project.
 
 **Statistics.** The Statistics page lists everything published in one table, whatever the platform, marked with the platform's icon. Above the table, you can filter by platform and by publishing date; the totals at the top stay for all posts. A number a platform doesn't report shows as a dash, such as views on Bluesky, and Bluesky replies count as comments. While YouTube is connected, the app fetches views, likes and comments of every uploaded video one minute after start and then every 3 hours (**statsIntervalHours** in the settings), storing one snapshot per refresh. The **Statistics** page shows the totals with their 24-hour change, a table of all videos and a chart of the selected video over time; **Refresh now** fetches immediately. A refresh also notices when a scheduled video has gone public. Uploading records the publication day as the episode's publish date, so the calendar shows the video on that day.
 
+![The Statistics page with totals, a table of published posts and a chart of views over time](docs/screenshots/stats.png)
+
 ## Posts
 
 The **Posts** page lists every post with its stage, outputs, destinations and publish date. You can filter by stage, platform and publish date. **Needs attention** shows posts with a failed publication, a missed publish time, a dependent publication that needs a new decision, or co-host lines that are flagged or need a check. Numbers are on the **Statistics** page.
 
+![The Posts page with each post's stage, outputs, destinations and publish date](docs/screenshots/posts.png)
+
 ## Activity
 
 The **Activity** page shows the project's work day by day: commits, notes and materials, plus anything you turn on under **Project settings > Connected activity**. Commits come from the project's **Sources**. Select **Refresh activity** to update the page. Records about the same work are grouped: the same commit always groups them, and the same time with shared files groups them as inferred. **Split** and **Join** override this, and your choice survives later reads.
+
+![The Activity page with a session linked to the commits it produced](docs/screenshots/activity.png)
 
 **AI sessions.** The app can read Claude Code and Codex session logs whose working directory is inside the project's sources. Both are off by default.
 
