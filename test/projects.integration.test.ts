@@ -125,7 +125,7 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
     const a = await createProject({ name: "Cleanup A", sourcePath: process.cwd() });
     const b = await createProject({ name: "Cleanup B", sourcePath: process.cwd() });
     const sharedTake = { segmentId: "s1", file: "tts/shared.mp3", hash: "shared", durationMs: 1000, words: [] };
-    const folder = path.join(process.cwd(), "output", "codex-test-cleanup");
+    const folder = path.join((await import("../server/config.js")).OUTPUT_DIR, "devlog-test-cleanup");
     await store.savePost(a.id, { ...post, id: "cleanup-a", outputDirs: [folder], narration: { portrait: [sharedTake] }, renders: {} });
     await (await import("../server/egress/youtube.js")).setUpload(a.id, "cleanup-a", "portrait", { videoId: "test-cleanup-video", status: "uploaded" });
     await query("INSERT INTO video_stats VALUES ('test-cleanup-video', now(), 10, 1, 0)");
