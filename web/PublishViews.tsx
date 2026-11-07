@@ -246,12 +246,18 @@ export function ActivitySourcesSection({ settings, active, onChange }: { setting
   };
   const terms = sources.find((s) => s.redactTerms?.length)?.redactTerms ?? [];
   const isSession = (connector: ActivitySource["connector"]) => connector === "claude-sessions" || connector === "codex-sessions";
-  const shown = candidates?.filter((c) => c.connector !== "git") ?? [];
+  // Until the search answers, the session tools and the saved forge sources show with their settings, so nothing waits on reading logs.
+  const pending: SourceCandidate[] = [
+    { connector: "claude-sessions", label: "Claude Code sessions", detail: "Counting sessions…", found: -1 },
+    { connector: "codex-sessions", label: "Codex sessions", detail: "Counting sessions…", found: -1 },
+    ...sources.filter((s) => !isSession(s.connector)).map((s): SourceCandidate => ({ connector: s.connector, label: s.repo ?? s.connector, detail: "Checking…", found: -1, repo: s.repo, baseUrl: s.baseUrl })),
+  ];
+  const shown = candidates?.filter((c) => c.connector !== "git") ?? pending;
   const hasForge = shown.some((c) => c.connector === "github" || c.connector === "forgejo");
   return (
     <SettingsSection title="Connected activity" description="Adds to the commits from the Sources section above. These appear on the Activity page, and they stay off until you turn them on.">
       {err ? <div className="error small">{err}</div> : null}
-      {!candidates ? <p className="muted small">Looking for sources…</p> : shown.map((c) => {
+      {shown.map((c) => {
         const source = sources.find((s) => s.id === activitySourceId(c.connector, c.repo));
         return (
           <div key={`${c.connector}${c.repo ?? ""}`}>
@@ -263,7 +269,7 @@ export function ActivitySourcesSection({ settings, active, onChange }: { setting
                 <p className="field-hint">Stores the images you sent to this tool. They wait under Materials &gt; From sessions until you add them, and agents can't see them there. Saving with this option on reads the older logs once.</p>
               </>
             ) : null}
-            {c.connector === "forgejo" && source?.enabled ? <ForgeFields candidate={c} source={source} onAddress={(baseUrl) => change(c, { baseUrl })} /> : null}
+            {c.connector === "forgejo" && source?.enabled && candidates ? <ForgeFields candidate={c} source={source} onAddress={(baseUrl) => change(c, { baseUrl })} /> : null}
           </div>
         );
       })}
