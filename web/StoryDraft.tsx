@@ -122,6 +122,7 @@ export function StoryFlow({ state, reload, selectedDay, around, request, setRequ
                 edit({ materialIds: [...(latest.current?.materialIds ?? []), ...created.map((m) => m.id)] });
                 reload();
               }}
+              onEdited={reload}
             />
             {ticked ? <div className="muted small">The draft must use the {ticked} item{ticked === 1 ? "" : "s"} you chose.</div> : null}
             <div className="row story-range">

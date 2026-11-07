@@ -227,6 +227,7 @@ export function ThemeEditor({ open, onOpenChange, theme, images, reloadImages, o
                 const added = m.filter((x) => x.kind === "image").map((x) => x.id);
                 if (added.length) set((t) => { t.backgroundMaterialIds = [...t.backgroundMaterialIds, ...added]; });
               }}
+              onEdited={reloadImages}
             />
 
             <div className="settings-subhead">Intro</div>

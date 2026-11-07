@@ -548,8 +548,10 @@ export function SuggestionCard(props: {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [focused]);
   const [draft, setDraft] = useState(s);
-  useEffect(() => setDraft(s), [s]);
-  const dirty = JSON.stringify({ ...draft, materialIds: [] }) !== JSON.stringify({ ...s, materialIds: [] });
+  // Compared by content, so that a reload after a material changes keeps unsaved text.
+  const saved = JSON.stringify({ ...s, materialIds: [] });
+  useEffect(() => setDraft(s), [saved]);
+  const dirty = JSON.stringify({ ...draft, materialIds: [] }) !== saved;
   const editor = (
     <div className="card-body">
       {s.proposedEdit ? (
@@ -580,7 +582,7 @@ export function SuggestionCard(props: {
         </label>
       </div>
       <div className="label">Materials</div>
-      <MaterialAttach attached={s.materialIds} all={materials} onChange={(ids) => onPatch({ materialIds: ids })} attach={{ suggestionId: s.id }} defaultDate={s.workDate} onUploaded={reload} />
+      <MaterialAttach attached={s.materialIds} all={materials} onChange={(ids) => onPatch({ materialIds: ids })} attach={{ suggestionId: s.id }} defaultDate={s.workDate} onUploaded={reload} onEdited={reload} />
       {s.sources.commits.length ? <CommitList commits={s.sources.commits} /> : null}
       {s.sources.sessions?.length ? <div className="muted small">Sessions: {s.sources.sessions.length}</div> : null}
       {s.possibleRepeatOf ? <div className="muted small">Shares commits with "{s.possibleRepeatOf}". Dismiss this one if it tells the same story.</div> : null}

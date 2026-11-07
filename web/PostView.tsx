@@ -196,7 +196,7 @@ function QuestionsStep(props: {
             <div className="muted small">Added for this video:</div>
           </>
         ) : null}
-        <MaterialAttach attached={ep.materialIds} all={materials} onChange={(ids) => save({ materialIds: ids })} attach={{ postId: ep.id }} onUploaded={onUploaded} />
+        <MaterialAttach attached={ep.materialIds} all={materials} onChange={(ids) => save({ materialIds: ids })} attach={{ postId: ep.id }} onUploaded={onUploaded} onEdited={onUploaded} />
       </div>
       <label>
         Direction for this video (optional)

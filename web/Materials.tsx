@@ -228,9 +228,11 @@ export function MaterialThumb({ m, onRemove, onClick, selected }: { m: Material;
   );
 }
 
-/** Attached materials with removal, the gallery picker for existing ones, and an upload form. */
-export function MaterialAttach({ attached, all, onChange, attach, defaultDate, onUploaded }: { attached: string[]; all: Material[]; onChange: (ids: string[]) => void; attach: { suggestionId?: string; postId?: string }; defaultDate?: string; onUploaded: (m: Material[]) => void }) {
+/** Attached materials with editing and removal, the gallery picker for existing ones, and an upload form. `onEdited` runs after a material is saved or deleted. */
+export function MaterialAttach({ attached, all, onChange, attach, defaultDate, onUploaded, onEdited }: { attached: string[]; all: Material[]; onChange: (ids: string[]) => void; attach: { suggestionId?: string; postId?: string }; defaultDate?: string; onUploaded: (m: Material[]) => void; onEdited: () => unknown }) {
   const [picking, setPicking] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
   const byId = useMemo(() => new Map(all.map((m) => [m.id, m])), [all]);
   const items = useMemo<MediaItem[]>(
     () => all.map((m) => ({ id: m.id, source: "library", thumb: mediaUrl(m.thumbKey), preview: mediaUrl(m.previewKey), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" })),
@@ -240,7 +242,7 @@ export function MaterialAttach({ attached, all, onChange, attach, defaultDate, o
     <div className="mattach">
       <div className="mgrid small">
         {attached.map((id) => byId.get(id)).filter((m): m is Material => !!m).map((m) => (
-          <MaterialThumb key={m.id} m={m} onRemove={() => onChange(attached.filter((x) => x !== m.id))} />
+          <MaterialThumb key={m.id} m={m} onClick={() => setEditing(m.id)} onRemove={() => onChange(attached.filter((x) => x !== m.id))} />
         ))}
       </div>
       <div className="row">
@@ -248,6 +250,18 @@ export function MaterialAttach({ attached, all, onChange, attach, defaultDate, o
       </div>
       {/* Pre-selected with the attached materials, so the picker also removes and reorders them. */}
       <MediaPicker open={picking} onOpenChange={setPicking} title="Attach materials" items={items} max={Infinity} selected={attached.filter((id) => byId.has(id))} onInsert={onChange} />
+      {editing ? <GroupOptions materials={all} /> : null}
+      <MaterialDialog
+        m={editing ? byId.get(editing) : undefined}
+        onClose={() => setEditing(null)}
+        onSaved={onEdited}
+        onDeleted={(warning) => {
+          setNotice(warning ?? "");
+          onChange(attached.filter((x) => x !== editing));
+          onEdited();
+        }}
+      />
+      {notice ? <p role="status" className="small">{notice}</p> : null}
       <UploadForm compact attach={attach} defaultDate={defaultDate} onDone={onUploaded} />
     </div>
   );
@@ -314,8 +328,8 @@ function MaterialCard({ m, onSaved, onDeleted }: { m: Material; onSaved: () => v
   );
 }
 
-/** Editing a material from the grid: a large preview beside the fields. Saving or deleting closes it. */
-function MaterialDialog({ m, onClose, onSaved, onDeleted }: { m: Material | undefined; onClose: () => void; onSaved: () => void; onDeleted: (warning?: string) => void }) {
+/** Editing a material: a large preview beside the fields. Saving or deleting closes it. */
+function MaterialDialog({ m, onClose, onSaved, onDeleted }: { m: Material | undefined; onClose: () => void; onSaved: () => unknown; onDeleted: (warning?: string) => void }) {
   return (
     <Dialog open={!!m} onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogContent className="material-dialog sm:max-w-4xl">
