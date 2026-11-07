@@ -1,5 +1,5 @@
 /** The kind of product a project is. It sets the default prompt guidance and the content globs of a new project. */
-export type ProjectArchetype = "game" | "webapp" | "mobile" | "other";
+export type ProjectArchetype = "game" | "webapp" | "mobile" | "news" | "other";
 
 export interface ArchetypeDefinition {
   label: string;
@@ -34,6 +34,13 @@ export const ARCHETYPES: Record<ProjectArchetype, ArchetypeDefinition> = {
     summary: "For people who use the app and fellow app developers.",
     descriptionPlaceholder: "the iOS and Android app My App, a habit tracker",
     guidance: `Write for people who use or might use this app and for fellow app developers, not for the developer's own team: describe what changed in the app, how it feels in the hand, and why it matters. ${PLAIN_LANGUAGE}\nGood shots include one complete flow on a phone screen, a gesture or transition that changed, and before/afters.`,
+    contentGlobs: [],
+  },
+  news: {
+    label: "Industry news",
+    summary: "Topics from your own news brief, for people who follow the industry.",
+    descriptionPlaceholder: "the XR Daily Brief, a daily roundup of XR industry news for the agency Example",
+    guidance: `Topics come from the author's news brief, not from work on a product. Where other instructions speak of progress, changes or the developer's work, read them as the news item and the author's view of it. Write for people who follow this industry: what happened, who reported it, and what it means for them. Credit every source by outlet and author. Summarize in your own words, quote at most one short, attributed sentence per source, and don't present reported claims as your own findings. ${PLAIN_LANGUAGE}\nGood shots show the key number or quote as a title or bullet slide, an image the author uploaded as a material, and the name of the source on screen.`,
     contentGlobs: [],
   },
   other: {

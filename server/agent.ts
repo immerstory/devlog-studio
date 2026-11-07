@@ -158,7 +158,7 @@ const SUGGESTION_FIELDS = {
   hook: str,
   summary: str,
   whyItMatters: str,
-  kind: { type: "string", enum: ["feature", "map", "art", "fix", "tech", "story", "other"] },
+  kind: { type: "string", enum: ["feature", "map", "art", "fix", "tech", "story", "news", "other"] },
   appeal: { type: "integer", minimum: 1, maximum: 5 },
   recommendedFormat: { type: "string", enum: ["short", "long", "either"] },
   workDate: str,

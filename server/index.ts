@@ -36,7 +36,7 @@ import {
   backfilledWeeks,
   resolveProposedEdit,
   runSessionReview,
-  sessionReviewInfo,
+  feedInfo, runFeedProposals, sessionReviewInfo,
   capturePost,
   createPost,
   episodeMaterials,
@@ -152,6 +152,8 @@ projectApi.get(
 
 projectApi.post("/discover", h((req) => startJob("discover", "global", (log) => runDiscovery(log, agentOf(req)))));
 
+projectApi.get("/feeds", h(() => feedInfo()));
+projectApi.post("/feeds/propose", h((req) => startJob("feeds", "global", (log) => runFeedProposals(log, agentOf(req)))));
 projectApi.get("/session-review", h(() => sessionReviewInfo()));
 projectApi.post(
   "/session-review",

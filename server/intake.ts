@@ -2,7 +2,7 @@ import type { IntakeSchedule, IntakeState } from "../shared/projects.js";
 import { inContext, projectId } from "./context.js";
 import { syncActivity } from "./ingress/sync.js";
 import { CancelledError, getJob, startJob, throwIfCancelled } from "./jobs.js";
-import { runDiscovery, runSessionReview } from "./pipeline.js";
+import { runDiscovery, runFeedProposals, runSessionReview } from "./pipeline.js";
 import { getProject, listProjects } from "./projects.js";
 import { getValue, setValue } from "./store.js";
 
@@ -64,6 +64,7 @@ export async function runIntake(schedule: IntakeSchedule, log: (line: string) =>
     if (result.errors.length) throw new Error(result.errors.join("; "));
   });
   if (schedule.propose) await step("Propose changes since last check", () => runDiscovery(log));
+  if (schedule.feeds) await step("Propose from feeds", () => runFeedProposals(log));
   if (schedule.review) await step("Review with sessions", () => { const weeks = reviewWeeks(now); return runSessionReview(weeks.from, weeks.to, false, log); });
   if (errors.length) throw new Error(errors.join(" "));
 }

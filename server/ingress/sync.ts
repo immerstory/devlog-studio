@@ -15,6 +15,7 @@ import type { DateRange, IngressConnector, SourceCandidate } from "./provider.js
 import { localDate } from "./provider.js";
 import { digestHash, mergeDigests, sessionConnector } from "./sessions.js";
 import { importingSources, importSessionImages } from "../sessionImages.js";
+import { feedContext, syncFeeds } from "./feeds.js";
 import { shorten } from "./redact.js";
 
 export function commitRecord(c: CommitEvidence): ActivityRecord {
@@ -135,6 +136,11 @@ export async function syncActivity(range: DateRange, log: (l: string) => void = 
     log(`${connector.label}: ${count} record(s).`);
     result.records += count;
   }
+  if (!only && activeSources().some((s) => s.feedGlobs?.length)) {
+    const feeds = await syncFeeds(range, log);
+    result.records += feeds.records;
+    result.errors.push(...feeds.errors);
+  }
   if (!only && importingSources(project.activitySources).length) {
     try { await importSessionImages(log); }
     catch (err) { const message = `Screenshots: ${(err as Error).message}`; result.errors.push(message); log(message); }
@@ -229,7 +235,8 @@ export async function summarizeRecord(id: string, log: (l: string) => void, writ
 
 /**
  * Background for a post's agents: the threads around the post's commits. A session contributes only its summary
- * and only as background. Excluded records and unsummarized sessions contribute nothing.
+ * and only as background. Excluded records and unsummarized sessions contribute nothing. Feed entries behind the topics come
+ * in full, with the rules for third-party text.
  */
 export async function activityContext(pid: string, post: Pick<Post, "suggestionIds">): Promise<string> {
   const stored = await listRecords(pid);
@@ -241,13 +248,14 @@ export async function activityContext(pid: string, post: Pick<Post, "suggestionI
   const pub: string[] = [], priv: string[] = [];
   for (const id of new Set(threads.flatMap((t) => t.recordIds))) {
     const r = byId.get(id)!;
-    if (r.visibility === "excluded" || r.kind === "commit") continue;
+    if (r.visibility === "excluded" || r.kind === "commit" || r.kind === "feed") continue;
     if (r.kind === "session") {
       const s = (r.detail as SessionDigest).aiSummary;
       if (s) priv.push(`- ${r.date}: attempted: ${s.attempted} Failed: ${s.failed || "-"} Changed course: ${s.changedCourse || "-"} Shipped: ${s.shipped || "-"}`);
     } else (r.visibility === "public" ? pub : priv).push(`- ${r.date} ${r.kind}: ${r.title}${r.summary ? `. ${r.summary}` : ""}`);
   }
   return [
+    await feedContext(pid, suggestions),
     pub.length ? `Related public activity:\n${pub.join("\n")}` : "",
     priv.length ? `Private working notes, as background only. Use them to understand the work and what went wrong. Don't quote them, and don't mention anything from them that the developer's answers or the public evidence don't also support:\n${priv.join("\n")}` : "",
   ].filter(Boolean).join("\n\n");

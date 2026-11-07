@@ -11,9 +11,10 @@ import { promisify } from "node:util";
 import { config, CACHE_DIR, type AgentKind } from "./config.js";
 import { activeSources, commitRef, latestSnapshotTime, collectCommitsBetween, collectEvidence, commitsByHash, type Evidence } from "./discovery.js";
 import { runAgent, SESSION_REVIEW_SCHEMA, STORY_DRAFT_SCHEMA, ARTICLE_REVIEW_SCHEMA, ARTICLE_SCHEMA, SOCIAL_TEXT_SCHEMA, QUESTIONS_SCHEMA, REVIEW_SCHEMA, SUGGESTIONS_SCHEMA, TURN_EDITS_SCHEMA, VERIFY_SCHEMA } from "./agent.js";
-import { articlePrompt, articleReviewPrompt, socialTextPrompt, backfillPrompt, sessionReviewPrompt, dialogueReviewPrompt, discoveryPrompt, fixClaimsPrompt, questionsPrompt, reviewPrompt, storyDraftPrompt, verifyPrompt } from "./prompts.js";
+import { articlePrompt, articleReviewPrompt, socialTextPrompt, backfillPrompt, sessionReviewPrompt, dialogueReviewPrompt, discoveryPrompt, feedPrompt, fixClaimsPrompt, questionsPrompt, reviewPrompt, storyDraftPrompt, verifyPrompt } from "./prompts.js";
 import { answersOf, assertCoHostVerified, evidenceSnapshot, scriptFingerprint, verificationFingerprint, verificationResult, type VerifiedClaim } from "./verification.js";
 import { activityContext, listRecords } from "./ingress/sync.js";
+import { feedContext, type FeedDetail } from "./ingress/feeds.js";
 import type { ActivityRecord } from "../shared/activity.js";
 import type { SessionDigest } from "../shared/activity.js";
 import { coHostDisclosure } from "../shared/cohost.js";
@@ -261,6 +262,48 @@ export function sharedCommitsSuggestion(topic: { commits: string[] }, existing: 
   const shared = (s: Suggestion) => topic.commits.filter((c) => s.sources.commits.some((o) => sameCommit(c, o))).length;
   const close = liveFirst(existing).filter((s) => shared(s) > 0 && shared(s) * 2 >= Math.max(topic.commits.length, s.sources.commits.length));
   return close.reduce<Suggestion | undefined>((top, s) => (!top || shared(s) > shared(top) ? s : top), undefined);
+}
+
+const FEEDS_PROPOSED = "feedEntriesProposed";
+/** Feed entries older than this are left for the developer, so turning a feed on doesn't start a run per archived entry. */
+const FEED_DAYS = 7;
+
+export const feedInfo = async () => {
+  const proposed = new Set((await getValue<string[]>(projectId(), FEEDS_PROPOSED)) ?? []);
+  const entries = (await listRecords(projectId(), { from: daysAgo(FEED_DAYS) })).filter((r) => r.kind === "feed" && r.visibility !== "excluded");
+  return { feeds: activeSources().some((s) => s.feedGlobs?.length), waiting: entries.filter((r) => !proposed.has(r.id)).length };
+};
+const daysAgo = (days: number) => { const d = new Date(); d.setDate(d.getDate() - days); return localDate(d); };
+
+/** One agent run per feed entry of the last week that has no topics yet. An entry is proposed from once, even when its file changes later. */
+export async function runFeedProposals(log: Log, agent?: AgentKind, write = runAgent) {
+  const pid = projectId();
+  const proposed = new Set((await getValue<string[]>(pid, FEEDS_PROPOSED)) ?? []);
+  const entries = (await listRecords(pid, { from: daysAgo(FEED_DAYS) })).filter((r) => r.kind === "feed" && r.visibility !== "excluded" && !proposed.has(r.id));
+  log(`${entries.length} feed entr${entries.length === 1 ? "y" : "ies"} without topics.`);
+  let added = 0;
+  for (const entry of entries) {
+    throwIfCancelled();
+    const existing = await listSuggestions(pid);
+    const evidence = { entry: { id: entry.id, date: entry.date, ...(entry.detail as FeedDetail) }, existingSuggestions: existing.filter((s) => s.kind === "news").map(({ id, title, status, workDate }) => ({ id, title, status, workDate })) };
+    const runId = newId("run");
+    const { output, costUsd } = await write<{ suggestions: RawSuggestion[] }>({
+      prompt: feedPrompt(writeEvidence(runId, evidence), entry.date, existing.filter((s) => s.status !== "dismissed" && s.status !== "merged").map((s) => s.title)),
+      schema: SUGGESTIONS_SCHEMA, agent, log,
+    });
+    await saveRun(pid, runId, "feed", evidence, output); logCost(log, costUsd);
+    const fresh = output.suggestions.filter((s) => {
+      const match = sameTitleSuggestion(s, existing);
+      if (match) log(`"${s.title}" repeats "${match.title}" (${match.status}).`);
+      return !match;
+    });
+    const ids = await storeSuggestions(fresh, new Set(), { from: entry.date, to: entry.date }, () => ({ kind: "news", sources: { commits: [], files: [], notes: [], feeds: [entry.id] } }));
+    log(`${entry.date}: ${ids.length} new topic(s).`);
+    added += ids.length;
+    proposed.add(entry.id);
+    await setValue(pid, FEEDS_PROPOSED, [...proposed].sort());
+  }
+  log(`${added} new suggestion(s).`);
 }
 
 export const sessionReviewInfo = async () => {
@@ -599,11 +642,17 @@ export async function episodeMaterials(ep: Post): Promise<Material[]> {
   return getMaterials(projectId(), [...new Set([...sugs.flatMap((s) => s.materialIds), ...ep.materialIds])]);
 }
 
+/** Adds the feed entries behind a post's topics to a prompt that doesn't take the activity context. */
+async function withFeeds(prompt: string, ep: Pick<Post, "suggestionIds">) {
+  const feeds = await feedContext(projectId(), await getSuggestions(projectId(), ep.suggestionIds));
+  return feeds ? `${prompt}\n\n${feeds}` : prompt;
+}
+
 export async function askQuestions(epId: string, log: Log, agent?: AgentKind) {
   const ep = await loadPost(projectId(), epId);
   const mats = await materialsForAgent(await episodeMaterials(ep));
   const { output, costUsd } = await runAgent<{ questions: Array<{ question: string; why: string }> }>({
-    prompt: questionsPrompt(ep, await getSuggestions(projectId(), ep.suggestionIds), mats.lines),
+    prompt: await withFeeds(questionsPrompt(ep, await getSuggestions(projectId(), ep.suggestionIds), mats.lines), ep),
     schema: QUESTIONS_SCHEMA,
     images: mats.images,
     agent,
@@ -776,7 +825,7 @@ export async function writeSocialText(publicationId: string, log: Log, agent?: A
   const placeholder = toYoutube ? " {{youtube.url}}" : toArticle ? " {{article.url}}" : "";
   const limit = (TEXT_LIMIT[publication.connector] ?? 300) - (placeholder ? PLACEHOLDER_LENGTH + 1 : 0);
   const sugs = await getSuggestions(pid, ep.suggestionIds);
-  const { output, costUsd } = await write<{ text: string }>({ prompt: socialTextPrompt(ep, sugs, CONNECTOR_LABEL[publication.connector], limit, toYoutube ? "video" : toArticle ? "article" : undefined), schema: SOCIAL_TEXT_SCHEMA, agent, log });
+  const { output, costUsd } = await write<{ text: string }>({ prompt: await withFeeds(socialTextPrompt(ep, sugs, CONNECTOR_LABEL[publication.connector], limit, toYoutube ? "video" : toArticle ? "article" : undefined), ep), schema: SOCIAL_TEXT_SCHEMA, agent, log });
   logCost(log, costUsd);
   await updatePublication(publicationId, { content: { text: `${output.text.trim()}${placeholder}`, title: publication.content.title ?? ep.title } });
   log("Text written.");

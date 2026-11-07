@@ -86,6 +86,12 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`(^|/)${escaped}$`, "i");
 }
 
+/** True when the path matches one of the globs. A glob without a slash matches the file name in any folder. */
+export const matchesGlob = (path: string, globs: string[]) => globs.some((g) => globToRegex(g).test(path));
+
+/** A commit that changes only feed files is the feed's delivery, not work on the project. */
+export const isFeedCommit = (files: Array<{ path: string }>, feedGlobs: string[] = []) => feedGlobs.length > 0 && files.length > 0 && files.every((f) => matchesGlob(f.path, feedGlobs));
+
 function isContent(path: string): boolean {
   return currentSource().contentGlobs.some((g) => globToRegex(g).test(path));
 }
@@ -124,6 +130,7 @@ export async function collectCommits(rangeArgs: string[], withObjects = true): P
         const [a, r, ...p] = l.split("\t");
         return { path: p.join("\t"), added: Number(a) || 0, removed: Number(r) || 0 };
       });
+    if (isFeedCommit(files, currentSource().feedGlobs)) continue;
     commits.push({ sourceId: currentSource().id, sourceLabel: currentSource().label, hash, date, subject, body: body.trim().slice(0, 2000), files: files.slice(0, 80), addedObjects: [] });
   }
   if (withObjects) for (const c of commits.slice(0, 60)) c.addedObjects = await commitAddedObjects(c.hash, c.files.map((f) => f.path));
@@ -191,9 +198,12 @@ export async function commitCounts(from: string, to: string): Promise<Record<str
     for (const source of activeSources()) for (const [date, count] of Object.entries(await inContext({ sourceId: source.id }, () => commitCounts(from, to)))) counts[date] = (counts[date] ?? 0) + count;
     return counts;
   }
-  const out = await git(["log", "--no-merges", `--since=${from}T00:00:00`, `--until=${to}T23:59:59`, "--format=%ad", "--date=short"]);
   const counts: Record<string, number> = {};
-  for (const d of out.split("\n").filter(Boolean)) counts[d] = (counts[d] ?? 0) + 1;
+  // Feed commits don't count, and only the full log shows which commits change nothing else.
+  const days = currentSource().feedGlobs?.length
+    ? (await collectCommits([`--since=${from}T00:00:00`, `--until=${to}T23:59:59`], false)).map((c) => c.date.slice(0, 10))
+    : (await git(["log", "--no-merges", `--since=${from}T00:00:00`, `--until=${to}T23:59:59`, "--format=%ad", "--date=short"])).split("\n").filter(Boolean);
+  for (const d of days) counts[d] = (counts[d] ?? 0) + 1;
   return counts;
 }
 

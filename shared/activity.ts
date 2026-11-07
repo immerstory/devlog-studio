@@ -1,6 +1,6 @@
 /** public can be quoted, private can only inform, and excluded never reaches an agent. */
 export type ActivityVisibility = "public" | "private" | "excluded";
-export type ActivityKind = "commit" | "workingChange" | "session" | "pullRequest" | "issue" | "release" | "note" | "material";
+export type ActivityKind = "commit" | "workingChange" | "session" | "pullRequest" | "issue" | "release" | "note" | "material" | "feed";
 
 export interface ActivityRefs {
   repo?: string;

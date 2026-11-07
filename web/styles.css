@@ -104,7 +104,7 @@
   .chip.st-approved { box-shadow: inset 3px 0 0 var(--ok); }
   .chip.st-used, .chip.st-dismissed, .chip.st-merged { opacity: 0.5; text-decoration: line-through; }
   .chip.picked { outline: 2px solid var(--foreground); outline-offset: -2px; }
-  .k-map { background: #d7e3d0; } .k-feature { background: #dde6ef; } .k-art { background: #f0dccd; } .k-story { background: #e8d9ec; } .k-fix { background: #ece5c8; } .k-tech { background: #dcdcdc; }
+  .k-map { background: #d7e3d0; } .k-feature { background: #dde6ef; } .k-art { background: #f0dccd; } .k-story { background: #e8d9ec; } .k-fix { background: #ece5c8; } .k-tech { background: #dcdcdc; } .k-news { background: #d4e8ea; }
   .more { font-size: 11px; color: var(--muted-foreground); margin-top: 2px; }
   .discover { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; padding: 12px; }
   .discover .row input[type="date"], .discover select { width: auto; }

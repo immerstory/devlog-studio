@@ -14,6 +14,7 @@ const KIND_LABEL: Record<string, string> = {
   summarize: "Summarizing a session",
   sessionImages: "Importing screenshots",
   intake: "Daily intake",
+  feeds: "Proposing from feeds",
   social: "Writing a post",
   article: "Writing an article",
   verify: "Checking co-host lines",

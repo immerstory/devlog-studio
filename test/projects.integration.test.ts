@@ -54,6 +54,50 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
       });
       await query("DELETE FROM activity WHERE project_id = $1", [one.id]);
     }
+    {
+      const { execFileSync } = await import("node:child_process");
+      const os = await import("node:os");
+      const repo = fs.mkdtempSync(path.join(os.tmpdir(), "devlog-feed-"));
+      const sh = (...args: string[]) => execFileSync("git", args, { cwd: repo, windowsHide: true }).toString();
+      sh("init", "-q"); sh("config", "user.email", "test@example.com"); sh("config", "user.name", "Test");
+      const today = new Date();
+      const day = (offset: number) => { const d = new Date(today); d.setDate(d.getDate() - offset); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+      fs.writeFileSync(path.join(repo, `brief-${day(1)}.txt`), "BRIEF ONE\n1. [HIGH] Headline (https://example.com/one)\n");
+      sh("add", "."); sh("commit", "-q", "-m", "Add brief");
+      fs.writeFileSync(path.join(repo, "tool.py"), "print(1)\n");
+      sh("add", "."); sh("commit", "-q", "-m", "Add tool");
+      fs.writeFileSync(path.join(repo, `brief-${day(40)}.txt`), "OLD BRIEF\n");
+      sh("add", "."); sh("commit", "-q", "-m", "Add old brief");
+      const news = await createProject({ name: "News", archetype: "news", sourcePath: repo });
+      try {
+        await saveProject(news.id, { ...news.settings, sources: news.settings.sources.map((x) => ({ ...x, feedGlobs: ["brief-*.txt"] })) });
+        await inContext({ projectId: news.id }, async () => {
+          const { syncFeeds, feedContext } = await import("../server/ingress/feeds.js");
+          const { collectCommitsBetween } = await import("../server/discovery.js");
+          const { runFeedProposals, feedInfo } = await import("../server/pipeline.js");
+          const { feedPrompt } = await import("../server/prompts.js");
+          assert.deepEqual((await collectCommitsBetween(day(60), day(-1))).map((c) => c.subject), ["Add tool"], "commits of feed files only aren't work");
+          assert.equal((await syncFeeds({ from: day(30) })).records, 1, "an entry dated before the range stays out");
+          assert.equal((await syncFeeds({ from: day(30) })).records, 0, "an unchanged file isn't read again");
+          assert.deepEqual(await feedInfo(), { feeds: true, waiting: 1 });
+          assert.match(feedPrompt("evidence.json", day(1), []), /You help an author turn their daily news brief/);
+          let calls = 0;
+          const write = (async () => { calls++; return { output: { suggestions: [{ title: "Headline", duplicateOf: "", hook: "h", summary: "s", whyItMatters: "w", kind: "news", appeal: 5, recommendedFormat: "short", workDate: day(1), commits: ["bogus"], files: [], notes: [], materials: [], suggestedShots: [] }] } }; }) as never;
+          await runFeedProposals(() => {}, undefined, write);
+          await runFeedProposals(() => {}, undefined, write);
+          assert.equal(calls, 1, "an entry is proposed from once");
+          const [topic] = (await store.listSuggestions(news.id)).filter((x) => x.title === "Headline");
+          assert.equal(topic.kind, "news");
+          assert.equal(topic.workDate, day(1));
+          assert.deepEqual(topic.sources, { commits: [], files: [], notes: [], feeds: [`feed:${news.settings.sources[0].id}:brief-${day(1)}.txt`] });
+          assert.match(await feedContext(news.id, [topic]), /BRIEF ONE/);
+          assert.equal(await feedContext(news.id, [{ sources: { commits: [], files: [], notes: [] } }]), "");
+        });
+      } finally {
+        await deleteProject(news.id, false);
+        fs.rmSync(repo, { recursive: true, force: true });
+      }
+    }
     const webapp = await createProject({ name: "Neutral wording", archetype: "webapp", sourcePath: process.cwd() });
     assert.deepEqual(webapp.settings.sources[0].contentGlobs, []);
     const { discoveryPrompt, questionsPrompt, scriptPrompt } = await import("../server/prompts.js");

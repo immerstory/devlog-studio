@@ -5,7 +5,10 @@ import { coHostPersona } from "../shared/cohost.js";
 import { spokenTurns } from "../shared/turns.js";
 import type { Post, Format, Script, Suggestion } from "../shared/types.js";
 
-const studio = () => `You help a solo developer turn daily progress on ${getProject().settings.description} into short devlog videos for YouTube, YouTube Shorts, Instagram Reels and TikTok.
+const opening = () => getProject().settings.archetype === "news"
+  ? `You help an author turn their daily news brief, ${getProject().settings.description}, into Shorts and social posts.`
+  : `You help a solo developer turn daily progress on ${getProject().settings.description} into short devlog videos for YouTube, YouTube Shorts, Instagram Reels and TikTok.`;
+const studio = () => `${opening()}
 Your working directory is the project's primary Git repository. Sources (all read-only): ${getProject().settings.sources.filter((s) => !s.archived).map((s) => `${s.label} [${s.id}]: ${s.path}`).join("; ")}. You may read files and run read-only git commands (git log, git show, git diff, git status) to understand changes. Never modify anything.
 ${promptGuidance(getProject().settings)}`;
 
@@ -33,6 +36,23 @@ Work that only appears as uncommitted edits still counts: infer what was built f
 workDate: the YYYY-MM-DD the work happened (latest commit/edit of the group; for uncommitted work use today; for a material, its date).
 
 ${SUGGESTION_RULES(existingTitles)}`;
+}
+
+export function feedPrompt(evidenceFile: string, date: string, existingTitles: string[]) {
+  return `${studio()}
+
+This JSON file holds one entry of the project's news feed, dated ${date}: ${evidenceFile}
+The author compiled the entry from industry news. It can hold rated items with sources and quotes, the author's analysis, drafts of posts and internal notes. Propose topics for Shorts and social posts from it.
+- One suggestion per news item that can carry a Short or a post on its own. A theme the entry follows over several days can also be a suggestion.
+- Take the items the entry rates as most important first. Where the entry rates an item, base appeal on that rating.
+- Write title, hook and summary in your own words. Name the outlet and the author of each source in the summary. Keep a quote only when it's short and attributed.
+- whyItMatters: the angle for the audience, usually taken from the entry's analysis.
+- The entry's draft posts and comment suggestions are the author's own words, and a suggestion can build on them.
+- Leave out internal notes: reminders, tagging ideas, people to contact, and notes about how the entry was made.
+- kind: "news". workDate: ${date}. recommendedFormat: "short". commits, files, notes and materials: empty lists. duplicateOf: an empty string.
+- suggestedShots: slides with the key number or quote, and the source's name on screen.
+- Do not repeat these existing topics unless the entry adds something new: ${existingTitles.length ? existingTitles.map((t) => `"${t}"`).join(", ") : "(none)"}.
+Return an empty list if nothing is worth a post.`;
 }
 
 export function backfillPrompt(evidenceFile: string, from: string, to: string, existingTitles: string[]) {

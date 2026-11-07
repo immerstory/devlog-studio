@@ -15,7 +15,7 @@ function LastRun({ state }: { state: IntakeState | null }) {
 }
 
 /** The project's daily intake. The steps that call an agent are off until the developer ticks them. */
-export function IntakeScheduleSection({ value, saved, onChange }: { value?: IntakeSchedule; saved?: IntakeSchedule; onChange: (schedule: IntakeSchedule) => void }) {
+export function IntakeScheduleSection({ value, saved, hasFeeds, onChange }: { value?: IntakeSchedule; saved?: IntakeSchedule; hasFeeds: boolean; onChange: (schedule: IntakeSchedule) => void }) {
   const schedule = { ...DEFAULT, ...value };
   const set = (patch: Partial<IntakeSchedule>) => onChange({ ...schedule, ...patch });
   const [info, setInfo] = useState<{ state: IntakeState | null; next: string | null } | null>(null);
@@ -37,6 +37,12 @@ export function IntakeScheduleSection({ value, saved, onChange }: { value?: Inta
       <p className="field-hint">Every run refreshes activity: commits, connected sources, session digests and, where turned on, the screenshots you sent. This step calls no agent.</p>
       <label className="check"><input type="checkbox" checked={schedule.propose} onChange={(e) => set({ propose: e.target.checked })} />Propose changes since last check</label>
       <p className="field-hint">Calls the default agent when there is new work, and its provider bills the run.</p>
+      {hasFeeds ? (
+        <>
+          <label className="check"><input type="checkbox" checked={!!schedule.feeds} onChange={(e) => set({ feeds: e.target.checked })} />Propose from feeds</label>
+          <p className="field-hint">Calls the default agent once per new feed entry of the last seven days.</p>
+        </>
+      ) : null}
       <label className="check"><input type="checkbox" checked={schedule.review} onChange={(e) => set({ review: e.target.checked })} />Review with sessions</label>
       <p className="field-hint">Reviews each complete week of the last four that isn't reviewed yet, with one agent call per week. A week is reviewed after it ends, on the Monday run.</p>
       <p className="muted small">

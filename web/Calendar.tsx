@@ -14,7 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Format, Material, StoryRequest, Suggestion, SuggestionStatus } from "../shared/types";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const KINDS: Suggestion["kind"][] = ["feature", "map", "art", "fix", "tech", "story", "other"];
+const KINDS: Suggestion["kind"][] = ["feature", "map", "art", "fix", "tech", "story", "news", "other"];
 const STATUSES: SuggestionStatus[] = ["proposed", "approved", "used", "dismissed", "merged"];
 
 
@@ -439,13 +439,17 @@ function ProgressPanel({ state, reload, act }: { state: AppState; reload: () => 
     setReview(r);
     setReviewFrom((f) => f || (r.firstSession ?? ""));
   });
+  const [feeds, setFeeds] = useState<{ feeds: boolean; waiting: number } | null>(null);
+  const loadFeeds = () => api<{ feeds: boolean; waiting: number }>("/api/feeds").then(setFeeds);
   useEffect(() => {
     loadReview().catch(() => {});
+    loadFeeds().catch(() => {});
   }, []);
   const job = useJob(() => {
     reload();
     loadInfo().catch(() => {});
     loadReview().catch(() => {});
+    loadFeeds().catch(() => {});
   });
   const takenAt = Object.values(state.snapshot ?? {}).map((s) => s.takenAt).sort().at(-1);
   const lastCheck = takenAt ? new Date(takenAt).toLocaleString() : "never";
@@ -464,6 +468,15 @@ function ProgressPanel({ state, reload, act }: { state: AppState; reload: () => 
           Propose changes since last check
         </Button>
       </div>
+      {feeds?.feeds ? (
+        <div className="row">
+          <div className="grow">
+            <strong>Propose from feeds</strong>
+            <div className="muted small">One agent run per feed entry of the last seven days that has no topics yet. {feeds.waiting} entr{feeds.waiting === 1 ? "y is" : "ies are"} waiting. Refresh activity reads new entries.</div>
+          </div>
+          <Button variant="outline" disabled={job.running || !feeds.waiting} onClick={() => act(() => job.start("/api/feeds/propose", { agent }))}>Propose from feeds</Button>
+        </div>
+      ) : null}
       <div className="row">
         <div className="grow">
           <strong>Backfill history</strong>

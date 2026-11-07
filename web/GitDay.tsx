@@ -17,7 +17,7 @@ export interface Commit {
   files: Array<{ path: string; added: number; removed: number }>;
 }
 
-const KINDS: Suggestion["kind"][] = ["feature", "map", "art", "fix", "tech", "story", "other"];
+const KINDS: Suggestion["kind"][] = ["feature", "map", "art", "fix", "tech", "story", "news", "other"];
 const EMPTY_FORM = { title: "", hook: "", summary: "", highlights: "", kind: "story" as Suggestion["kind"] };
 
 /**

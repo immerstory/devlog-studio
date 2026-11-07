@@ -5,7 +5,7 @@ import { CommitLink, CommitList } from "./CommitLinks";
 import type { ActivityLink, ActivityRecord, ActivityThread, SessionDigest } from "../shared/activity";
 
 interface View { records: ActivityRecord[]; links: ActivityLink[]; threads: ActivityThread[] }
-const KIND_LABEL: Record<ActivityRecord["kind"], string> = { commit: "Commit", workingChange: "Edit", session: "Session", pullRequest: "Pull request", issue: "Issue", release: "Release", note: "Note", material: "Material" };
+const KIND_LABEL: Record<ActivityRecord["kind"], string> = { commit: "Commit", workingChange: "Edit", session: "Session", pullRequest: "Pull request", issue: "Issue", release: "Release", note: "Note", material: "Material", feed: "Feed" };
 const STRENGTH_LABEL = { exact: "Same commit", strong: "Same time and files", weak: "Same day", manual: "Your choice" };
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const daysAgo = (n: number) => iso(new Date(Date.now() - n * 86400_000));

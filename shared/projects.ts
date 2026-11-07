@@ -7,6 +7,8 @@ export interface Source {
   label: string;
   path: string;
   contentGlobs: string[];
+  /** Files read for their text, such as a daily news brief. Commits that change only these files leave the commit evidence. */
+  feedGlobs?: string[];
   archived?: boolean;
 }
 export type UnityTargetConfig = StudioConfig["unity"]["mcp"] & { projectPath: string };
@@ -66,6 +68,8 @@ export interface IntakeSchedule {
   time: string;
   propose: boolean;
   review: boolean;
+  /** Propose news topics from new feed entries. */
+  feeds?: boolean;
 }
 /** What the scheduler last did for a project. */
 export interface IntakeState {

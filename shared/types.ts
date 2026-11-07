@@ -36,7 +36,7 @@ export const FORMAT_SIZE: Record<Format, { width: number; height: number }> = {
 };
 
 export type SuggestionStatus = "proposed" | "approved" | "dismissed" | "merged" | "used";
-export type SuggestionKind = "feature" | "map" | "art" | "fix" | "tech" | "story" | "other";
+export type SuggestionKind = "feature" | "map" | "art" | "fix" | "tech" | "story" | "news" | "other";
 
 /** New wording a session review proposes for a suggestion. It applies only when the developer accepts it. */
 /** What the developer asks the agent to write. Ticked commits, notes and materials must end up in the draft. */
@@ -100,8 +100,8 @@ export interface Suggestion {
   /** Agent's 1–5 estimate of how interesting this is to an outside viewer. */
   appeal: number;
   recommendedFormat: "short" | "long" | "either";
-  /** sessions: IDs of the session records behind this topic. */
-  sources: { commits: string[]; files: string[]; notes: string[]; sessions?: string[] };
+  /** sessions and feeds: IDs of the session and feed records behind this topic. */
+  sources: { commits: string[]; files: string[]; notes: string[]; sessions?: string[]; feeds?: string[] };
   /** A session review found this topic. */
   fromSessionReview?: boolean;
   /** Title of an existing suggestion that shares this one's commits. One large commit can hold several stories, so the developer decides. */

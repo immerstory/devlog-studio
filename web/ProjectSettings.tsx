@@ -13,7 +13,7 @@ import { IntakeScheduleSection } from "./IntakeSchedule";
 import { ArchetypePicker, PromptGuidanceField } from "./ArchetypeFields";
 import { CoHostSection } from "./CoHostFields";
 import { ActivitySourcesSection, EgressConnectionsSection } from "./PublishViews";
-import { BASE_URL_HINT, CONTENT_GLOBS_HINT, DEFAULT_TARGET_HINT, DESCRIPTION_HINT, descriptionExample, HEADER_ARGS_HINT, HEADER_HELPER_HINT, MCP_URL_HINT, NAME_HINT, PRIMARY_SOURCE_HINT, PUBLIC_TITLE_HINT, REQUEST_HEADERS_HINT, SLUG_HINT, SOURCE_LABEL_HINT, TARGET_CSS_HINT, TARGET_NAME_HINT, UNITY_PROJECT_HINT, USER_AGENT_HINT, WORKING_COPY_HINT } from "./project-fields";
+import { BASE_URL_HINT, CONTENT_GLOBS_HINT, FEED_GLOBS_HINT, DEFAULT_TARGET_HINT, DESCRIPTION_HINT, descriptionExample, HEADER_ARGS_HINT, HEADER_HELPER_HINT, MCP_URL_HINT, NAME_HINT, PRIMARY_SOURCE_HINT, PUBLIC_TITLE_HINT, REQUEST_HEADERS_HINT, SLUG_HINT, SOURCE_LABEL_HINT, TARGET_CSS_HINT, TARGET_NAME_HINT, UNITY_PROJECT_HINT, USER_AGENT_HINT, WORKING_COPY_HINT } from "./project-fields";
 
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 function Text({ label, hint, value, onChange, type = "text" }: { label: string; hint?: React.ReactNode; value?: string | number; onChange: (v: string) => void; type?: string }) {
@@ -123,6 +123,7 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
               <PathField kind="git" label="Git working copy" hint={WORKING_COPY_HINT} value={source.path} onChange={(v) => edit((p) => { p.settings.sources[i].path = v; })} />
             </div>
             <label>Content globs<ListInput value={source.contentGlobs} onChange={(v) => edit((p) => { p.settings.sources[i].contentGlobs = v; })} /><span className="field-hint">{CONTENT_GLOBS_HINT}</span></label>
+            <label>Feed files<ListInput value={source.feedGlobs ?? []} onChange={(v) => edit((p) => { if (v.length) p.settings.sources[i].feedGlobs = v; else delete p.settings.sources[i].feedGlobs; })} /><span className="field-hint">{FEED_GLOBS_HINT}</span></label>
             <div className="row">
               <label className="check"><input type="radio" name="primary-source" disabled={source.archived} checked={s.primarySourceId === source.id} onChange={() => edit((p) => { p.settings.primarySourceId = source.id; })} />Primary source</label>
               {source.archived ? <span className="muted small">Archived</span> : null}
@@ -137,7 +138,7 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
 
       <ActivitySourcesSection settings={s} active={tab === "sources"} onChange={(sources) => edit((p) => { p.settings.activitySources = sources; })} />
 
-      <IntakeScheduleSection value={s.intake} saved={project.settings.intake} onChange={(intake) => edit((p) => { p.settings.intake = intake; })} />
+      <IntakeScheduleSection value={s.intake} saved={project.settings.intake} hasFeeds={s.sources.some((x) => !x.archived && !!x.feedGlobs?.length)} onChange={(intake) => edit((p) => { p.settings.intake = intake; })} />
 
       {runtime.sections?.discovery}
       </div>
