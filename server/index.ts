@@ -71,6 +71,7 @@ import { approvePublication, cancelPublication, createPublication, deleteEgressC
 import { postImageChoices } from "./egress/article.js";
 import { linkedinAuthUrl, linkedinExchange } from "./egress/linkedin.js";
 import type { ArticleDraft } from "../shared/outputs.js";
+import { addSessionImage, importingSources, importSessionImages, listSessionImages, setSessionImageStatus } from "./sessionImages.js";
 import { activityView, discoverSources, saveForgeToken, setManualLink, setVisibility, summarizeRecord, syncActivity } from "./ingress/sync.js";
 import { captureOperation } from "./capture/provider.js";
 
@@ -325,6 +326,26 @@ projectApi.delete(
   }),
 );
 
+// ---------- images from sessions ----------
+
+projectApi.get("/session-images", h(() => listSessionImages(projectId())));
+projectApi.post("/session-images/scan", h(() => startJob("sessionImages", "project", (log) => importSessionImages(log))));
+projectApi.patch("/session-images/:id", h((req) => {
+  const status = req.body?.status;
+  if (status !== "inbox" && status !== "dismissed") throw bad("Use the status inbox or dismissed");
+  return setSessionImageStatus(param(req, "id"), status);
+}));
+projectApi.post("/session-images/:id/material", h((req) => {
+  const b = req.body as Partial<Material>;
+  return addSessionImage(param(req, "id"), {
+    ...(isDate(b.date) ? { date: b.date } : {}),
+    ...(typeof b.title === "string" ? { title: b.title } : {}),
+    ...(typeof b.annotation === "string" ? { annotation: b.annotation } : {}),
+    ...(Array.isArray(b.tags) ? { tags: b.tags.filter((t) => typeof t === "string") } : {}),
+    ...("group" in b ? { group: normalizeGroup(b.group) } : {}),
+  });
+}));
+
 // ---------- episodes ----------
 
 projectApi.get("/posts", h(() => postsOverview()));
@@ -486,7 +507,13 @@ projectApi.put("/settings/runtime", h(async (req) => {
 }));
 projectApi.get("/settings", h(() => getProject()));
 projectApi.get("/sources/usage", h(() => sourceUsage(projectId())));
-projectApi.put("/settings", h((req) => saveProject(projectId(), req.body.settings as ProjectSettings, req.body.slug)));
+projectApi.put("/settings", h(async (req) => {
+  const before = importingSources(getProject(projectId()).settings.activitySources).map((s) => s.id);
+  const saved = await saveProject(projectId(), req.body.settings as ProjectSettings, req.body.slug);
+  // Turning the option on reads the logs that were already read for activity.
+  if (importingSources(saved.settings.activitySources).some((s) => !before.includes(s.id))) await startJob("sessionImages", "project", (log) => importSessionImages(log));
+  return saved;
+}));
 app.get("/api/settings", h(() => {
   const { apiKey } = globalConfig().elevenlabs;
   return { ...globalConfig(), elevenlabs: { apiKeySet: !!apiKey, apiKeyFromEnv: !!process.env.ELEVENLABS_API_KEY } };

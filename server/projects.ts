@@ -11,7 +11,7 @@ import type pg from "pg";
 import type { Project, ProjectSettings, Source, YouTubeConnection } from "../shared/projects.js";
 import type { EgressConnection } from "../shared/publications.js";
 import { listJobs } from "./jobs.js";
-import { deleteKey, listKeys } from "./storage.js";
+import { deleteKey, deletePrefix, listKeys } from "./storage.js";
 import { pinDefaultCaptureTarget } from "../shared/references.js";
 import { ARCHETYPES, isArchetype, type ProjectArchetype } from "../shared/archetypes.js";
 
@@ -115,11 +115,12 @@ export async function saveProject(id: string, settings: ProjectSettings, slug = 
   if (new Set(settings.sources.map((s) => s.id)).size !== settings.sources.length || new Set(settings.captureTargets.map((t) => t.id)).size !== settings.captureTargets.length) throw new Error("Sources and capture targets need unique IDs");
   for (const source of settings.sources.filter((s) => !s.archived && old.settings.sources.find((o) => o.id === s.id)?.path !== s.path)) await checkSource(source.path);
   const p = { ...old, settings, slug };
+  let removedImages: string[] = [];
   await projectWrite(id, async (c) => {
     const previous = (await c.query("SELECT data FROM projects WHERE id = $1", [id])).rows[0].data.settings as ProjectSettings;
     const posts = (await c.query("SELECT data FROM posts WHERE project_id = $1", [id])).rows.map((r) => r.data);
     validateCaptureTargetChange(previous, settings, posts);
-    if (removedSources.length) await removeSources(c, id, removedSources);
+    if (removedSources.length) removedImages = await removeSources(c, id, removedSources);
     if (settings.publishing.connectionId && !(await c.query("SELECT id FROM egress_connections WHERE id = $1 AND connector = 'youtube' FOR KEY SHARE", [settings.publishing.connectionId])).rowCount) throw notFound("YouTube connection");
     await validateReferences(c, id, { materialIds: settings.theme.backgroundMaterialIds });
     if (previous.defaultCaptureTargetId && previous.defaultCaptureTargetId !== settings.defaultCaptureTargetId) {
@@ -129,7 +130,9 @@ export async function saveProject(id: string, settings: ProjectSettings, slug = 
     }
     await c.query("UPDATE projects SET slug = $2, data = $3 WHERE id = $1", [id, slug, { settings }]);
   });
-  projects.set(id, p); return p;
+  projects.set(id, p);
+  await Promise.all(removedImages.map((image) => deletePrefix(`projects/${id}/session-images/${image}/`).catch(() => {})));
+  return p;
 }
 /** Suggestions per source. A suggestion cites its source's commits, so that source has to stay readable. */
 export async function sourceUsage(pid: string) {
@@ -148,6 +151,7 @@ async function removeSources(c: pg.PoolClient, pid: string, removed: Source[]) {
     if (used) throw Object.assign(new Error(`Suggestions use the source "${used.label}", so archive it instead of deleting it.`), { status: 409 });
   }
   const records = (await c.query("SELECT id FROM activity WHERE project_id = $1 AND data->>'sourceId' = ANY($2)", [pid, [...ids]])).rows.map((r: { id: string }) => r.id);
+  const images = (await c.query("DELETE FROM session_images WHERE project_id = $1 AND data->>'sourceId' = ANY($2) RETURNING id", [pid, [...ids]])).rows.map((r: { id: string }) => r.id);
   await c.query("DELETE FROM activity_links WHERE project_id = $1 AND (a = ANY($2) OR b = ANY($2))", [pid, records]);
   await c.query("DELETE FROM activity WHERE project_id = $1 AND id = ANY($2)", [pid, records]);
   for (const row of (await c.query("SELECT key, value FROM settings WHERE key = ANY($1) OR key LIKE $2", [[`project:${pid}:snapshot`, `project:${pid}:backfilledWeeks`], `project:${pid}:activityCursor:%`])).rows) {
@@ -159,6 +163,7 @@ async function removeSources(c: pg.PoolClient, pid: string, removed: Source[]) {
     } else for (const id of ids) delete value[id];
     await c.query("UPDATE settings SET value = $2 WHERE key = $1", [row.key, value]);
   }
+  return images;
 }
 export function validateCaptureTargetChange(previous: ProjectSettings, next: ProjectSettings, posts: import("../shared/types.js").Post[]) {
   const ids = new Set(next.captureTargets.map((t) => t.id));
@@ -221,7 +226,7 @@ export async function resumeDeletion(pid: string, io = cleanupIO) {
       const owned = await uploads("=");
       const shared = new Set(await uploads("<>"));
       await c.query("DELETE FROM video_stats WHERE video_id = ANY($1)", [owned.filter((id) => !shared.has(id))]);
-      for (const table of ["suggestions", "notes", "materials", "posts", "runs", "activity", "activity_links", "publications", "publication_stats"]) await c.query(`DELETE FROM ${table} WHERE project_id = $1`, [pid]);
+      for (const table of ["suggestions", "notes", "materials", "posts", "runs", "activity", "activity_links", "session_images", "publications", "publication_stats"]) await c.query(`DELETE FROM ${table} WHERE project_id = $1`, [pid]);
       await c.query("DELETE FROM settings WHERE key LIKE $1", [`project:${pid}:%`]);
       manifest.rowsDeleted = true;
       await c.query("UPDATE projects SET data = $2 WHERE id = $1", [pid, { settings: p.settings, deletion: manifest }]);

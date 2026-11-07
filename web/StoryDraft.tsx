@@ -118,6 +118,7 @@ export function StoryFlow({ state, reload, selectedDay, around, request, setRequ
               all={state.materials}
               onChange={(materialIds) => edit({ materialIds })}
               attach={{}}
+              sessions={{ from: open.from, to: open.to }}
               onUploaded={(created) => {
                 edit({ materialIds: [...(latest.current?.materialIds ?? []), ...created.map((m) => m.id)] });
                 reload();

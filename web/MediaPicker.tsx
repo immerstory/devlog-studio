@@ -7,8 +7,8 @@ import { Tick02Icon } from "@hugeicons/core-free-icons";
 /** Something a slide or shot can show: a frame of an earlier segment, or a material. */
 export interface MediaItem {
   id: string;
-  /** "shot": a segment of this video; "video": a material of this video; "library": any other material. */
-  source: "shot" | "video" | "library";
+  /** "shot": a segment of this video; "video": a material of this video; "story" and "period": an image from a session log, not yet a material; "library": any other material. */
+  source: "shot" | "video" | "story" | "period" | "library";
   thumb?: string;
   /** Larger image for the details panel. */
   preview?: string;
@@ -23,8 +23,12 @@ const SOURCES: Array<{ key: "all" | MediaItem["source"]; label: string }> = [
   { key: "all", label: "All" },
   { key: "shot", label: "Shots in this video" },
   { key: "video", label: "This video's materials" },
+  { key: "story", label: "From this story's sessions" },
+  { key: "period", label: "Other session images from this period" },
   { key: "library", label: "Library" },
 ];
+
+const isSessionImage = (item: MediaItem) => item.source === "story" || item.source === "period";
 
 /** A selectable thumbnail; multi-selection shows the pick order, single selection a tick. */
 function Tile({ item, order, single, active, onClick, onDoubleClick }: { item: MediaItem; order: number; single: boolean; active: boolean; onClick: () => void; onDoubleClick: () => void }) {
@@ -72,6 +76,10 @@ export function MediaPicker(props: { open: boolean; onOpenChange: (open: boolean
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const q = query.trim().toLowerCase();
   const shown = items.filter((i) => (source === "all" || i.source === source) && (!q || `${i.title} ${i.date ?? ""} ${i.group ?? ""} ${i.annotation ?? ""}`.toLowerCase().includes(q)));
+  // Session images come with headings, so that they don't look like materials.
+  const sections = source === "all" && shown.some(isSessionImage)
+    ? SOURCES.filter((s) => s.key !== "all").map((s) => ({ key: s.key, label: s.label, list: shown.filter((i) => i.source === s.key) })).filter((s) => s.list.length)
+    : [{ key: "all", label: "", list: shown }];
   const groups = [...new Set(shown.map((i) => i.group).filter((g): g is string => !!g))].sort();
   const counts = Object.fromEntries(SOURCES.map((s) => [s.key, s.key === "all" ? items.length : items.filter((i) => i.source === s.key).length]));
 
@@ -117,11 +125,16 @@ export function MediaPicker(props: { open: boolean; onOpenChange: (open: boolean
         </div>
         <div className="mp-body">
           <div className="mp-scroll">
-            <div className="mgrid">
-              {shown.map((i) => (
-                <Tile key={i.id} item={i} order={picked.indexOf(i.id) + 1} single={single} active={active === i.id} onClick={() => toggle(i.id)} onDoubleClick={() => single && insert([i.id])} />
-              ))}
-            </div>
+            {sections.map(({ key, label, list }) => (
+              <React.Fragment key={key}>
+                {label ? <div className="label mp-section">{label}</div> : null}
+                <div className="mgrid">
+                  {list.map((i) => (
+                    <Tile key={i.id} item={i} order={picked.indexOf(i.id) + 1} single={single} active={active === i.id} onClick={() => toggle(i.id)} onDoubleClick={() => single && insert([i.id])} />
+                  ))}
+                </div>
+              </React.Fragment>
+            ))}
             {!shown.length ? <p className="muted">Nothing matches.</p> : null}
           </div>
           <aside className="mp-detail">
@@ -131,6 +144,7 @@ export function MediaPicker(props: { open: boolean; onOpenChange: (open: boolean
                 <div className="mp-title">{detail.title}</div>
                 <div className="muted small">{[detail.source === "shot" ? "Shot in this video" : detail.date, detail.isVideo ? "video" : null, detail.group ? `group “${detail.group}”` : null].filter(Boolean).join(" · ")}</div>
                 {detail.annotation ? <p className="small mp-annotation">{detail.annotation}</p> : null}
+                {isSessionImage(detail) ? <p className="muted small">Inserting this image adds it to your materials.</p> : null}
               </>
             ) : (
               <p className="muted small">Click an image to see its details.</p>

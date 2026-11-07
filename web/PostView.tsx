@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { VideoPlayer } from "./VideoPlayer";
 import { api, apiUrl, projectHref, mediaUrl, useJob } from "./api";
 import { largeImage, MaterialAttach, MaterialThumb } from "./Materials";
+import { sessionPeriod } from "./SessionImages";
 import { SuggestionCard } from "./Calendar";
 import { SegTabs } from "@/components/seg-tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -196,7 +197,7 @@ function QuestionsStep(props: {
             <div className="muted small">Added for this video:</div>
           </>
         ) : null}
-        <MaterialAttach attached={ep.materialIds} all={materials} onChange={(ids) => save({ materialIds: ids })} attach={{ postId: ep.id }} onUploaded={onUploaded} onEdited={onUploaded} />
+        <MaterialAttach attached={ep.materialIds} all={materials} onChange={(ids) => save({ materialIds: ids })} attach={{ postId: ep.id }} onUploaded={onUploaded} onEdited={onUploaded} sessions={{ records: topics.flatMap((t) => t.sources.sessions ?? []), ...sessionPeriod(topics.map((t) => t.workDate)) }} />
       </div>
       <label>
         Direction for this video (optional)

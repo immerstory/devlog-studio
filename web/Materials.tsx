@@ -9,6 +9,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { Material, MaterialDeletion } from "../shared/types";
 import { MediaPicker, type MediaItem } from "./MediaPicker";
 import { isMedia, pastedMedia, pasteTarget, UPLOAD_FORM_ATTRIBUTE } from "./paste";
+import { JOB_FINISHED } from "./JobDock";
+import { largeSessionImage, SessionImagesInbox, toolName, type SessionContext } from "./SessionImages";
+import type { SessionImage } from "../shared/activity";
 
 /** Uploads files with shared date, annotation and tags; optional attachment to a suggestion or episode. */
 export async function uploadMaterials(files: File[], fields: { date: string; title?: string; annotation: string; tags: string; group?: string }, attach?: { suggestionId?: string; postId?: string }): Promise<Material[]> {
@@ -229,15 +232,47 @@ export function MaterialThumb({ m, onRemove, onClick, selected }: { m: Material;
 }
 
 /** Attached materials with editing and removal, the gallery picker for existing ones, and an upload form. `onEdited` runs after a material is saved or deleted. */
-export function MaterialAttach({ attached, all, onChange, attach, defaultDate, onUploaded, onEdited }: { attached: string[]; all: Material[]; onChange: (ids: string[]) => void; attach: { suggestionId?: string; postId?: string }; defaultDate?: string; onUploaded: (m: Material[]) => void; onEdited: () => unknown }) {
+const SESSION_IMAGE_PREFIX = "si-";
+
+export function MaterialAttach({ attached, all, onChange, attach, defaultDate, onUploaded, onEdited, sessions }: { attached: string[]; all: Material[]; onChange: (ids: string[]) => void; attach: { suggestionId?: string; postId?: string }; defaultDate?: string; onUploaded: (m: Material[]) => void; onEdited: () => unknown; sessions?: SessionContext }) {
   const [picking, setPicking] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const byId = useMemo(() => new Map(all.map((m) => [m.id, m])), [all]);
-  const items = useMemo<MediaItem[]>(
-    () => all.map((m) => ({ id: m.id, source: "library", thumb: mediaUrl(m.thumbKey), preview: largeImage(m), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" })),
-    [all],
-  );
+  const [sessionImages, setSessionImages] = useState<SessionImage[]>([]);
+  useEffect(() => {
+    if (picking && sessions) api<SessionImage[]>("/api/session-images").then(setSessionImages, () => setSessionImages([]));
+  }, [picking]);
+  const items = useMemo<MediaItem[]>(() => {
+    const offered = (image: SessionImage): MediaItem["source"] | undefined => {
+      if (image.status !== "inbox" || !sessions) return undefined;
+      if (sessions.records?.includes(image.recordId)) return "story";
+      return sessions.from && sessions.to && image.date >= sessions.from && image.date <= sessions.to ? "period" : undefined;
+    };
+    return [
+      ...sessionImages.flatMap((image): MediaItem[] => {
+        const source = offered(image);
+        return source ? [{ id: image.id, source, thumb: mediaUrl(image.thumbKey), preview: largeSessionImage(image), title: image.title, date: `${image.date} · ${toolName(image.tool)}`, annotation: image.message }] : [];
+      }),
+      ...all.map((m): MediaItem => ({ id: m.id, source: "library", thumb: mediaUrl(m.thumbKey), preview: largeImage(m), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" })),
+    ];
+  }, [all, sessionImages, sessions?.from, sessions?.to, sessions?.records?.join()]);
+  /** A chosen session image becomes a material first, and its place in the order stays. */
+  const insert = async (ids: string[]) => {
+    const waiting = ids.filter((id) => id.startsWith(SESSION_IMAGE_PREFIX));
+    if (!waiting.length) return onChange(ids);
+    setNotice(`Adding ${waiting.length} image${waiting.length === 1 ? "" : "s"} to your materials…`);
+    const added = new Map<string, string>();
+    try {
+      for (const id of waiting) added.set(id, (await api<Material>(`/api/session-images/${id}/material`, "POST", {})).id);
+      setNotice("");
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+    onChange(ids.flatMap((id) => (id.startsWith(SESSION_IMAGE_PREFIX) ? added.get(id) ?? [] : id)));
+    setSessionImages((list) => list.filter((image) => !added.has(image.id)));
+    onEdited();
+  };
   return (
     <div className="mattach">
       <div className="mgrid small">
@@ -249,7 +284,7 @@ export function MaterialAttach({ attached, all, onChange, attach, defaultDate, o
         <Button variant="outline" onClick={() => setPicking(true)}>Attach existing…</Button>
       </div>
       {/* Pre-selected with the attached materials, so the picker also removes and reorders them. */}
-      <MediaPicker open={picking} onOpenChange={setPicking} title="Attach materials" items={items} max={Infinity} selected={attached.filter((id) => byId.has(id))} onInsert={onChange} />
+      <MediaPicker open={picking} onOpenChange={setPicking} title="Attach materials" items={items} max={Infinity} selected={attached.filter((id) => byId.has(id))} onInsert={(ids) => void insert(ids)} />
       {editing ? <GroupOptions materials={all} /> : null}
       <MaterialDialog
         m={editing ? byId.get(editing) : undefined}
@@ -377,10 +412,30 @@ export function MaterialsPage({ materials, reload }: { materials: Material[]; re
   const [notice, setNotice] = useState("");
   const onDeleted = (warning?: string) => { setNotice(warning ?? "Material deleted."); reload(); };
   const shown = materials.filter((m) => !query || `${m.title} ${m.annotation} ${m.tags.join(" ")} ${m.group ?? ""} ${m.date}`.toLowerCase().includes(query.toLowerCase()));
+  const [tab, setTab] = usePersistent<"library" | "sessions">("materialsTab", "library");
+  const [sessionImages, setSessionImages] = useState<SessionImage[] | null>(null);
+  const loadSessionImages = () => api<SessionImage[]>("/api/session-images").then(setSessionImages, () => setSessionImages([]));
+  useEffect(() => {
+    void loadSessionImages();
+    const finished = () => void loadSessionImages();
+    addEventListener(JOB_FINISHED, finished);
+    return () => removeEventListener(JOB_FINISHED, finished);
+  }, []);
+  const waiting = sessionImages?.filter((i) => i.status === "inbox").length ?? 0;
+  const tabs = <SegTabs value={tab} onChange={setTab} items={[{ value: "library", label: "Library" }, { value: "sessions", label: `From sessions${waiting ? ` · ${waiting}` : ""}` }]} />;
+  if (tab === "sessions") return (
+    <div className="panel pad materials-page">
+      <GroupOptions materials={materials} />
+      <h2>Materials</h2>
+      {tabs}
+      <SessionImagesInbox images={sessionImages} reload={() => void loadSessionImages()} onAdded={() => { void loadSessionImages(); reload(); }} />
+    </div>
+  );
   return (
     <div className="panel pad materials-page">
       <GroupOptions materials={materials} />
       <h2>Materials</h2>
+      {tabs}
       {notice && <p role="status">{notice}</p>}
       <p className="muted">Screenshots and videos with the story behind them: experiments, abandoned versions, moments the repository no longer shows. Progress checks, backfills, questions and scripts use their dates and annotations, and scripts can show them. Materials with the same group name belong together: when several of them are used, the agent tells their story as one beat and shows them as one polaroid stack. Only the materials you choose are used; to use a whole group, choose it with <em>add group…</em> in the picker.</p>
       <UploadForm onDone={reload} />

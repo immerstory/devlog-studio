@@ -12,6 +12,7 @@ const KIND_LABEL: Record<string, string> = {
   publish: "Publishing",
   activity: "Refreshing activity",
   summarize: "Summarizing a session",
+  sessionImages: "Importing screenshots",
   social: "Writing a post",
   article: "Writing an article",
   verify: "Checking co-host lines",

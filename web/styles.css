@@ -479,6 +479,13 @@
   .strip-caption { width: 100%; margin-top: 3px; font-size: 12px; padding: 2px 5px; text-align: center; }
 
   .materials-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .si-toolbar select { width: auto; }
+  .si-toolbar .check { white-space: nowrap; }
+  .si-day { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .si-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .si-message { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; min-height: 3.6em; }
+  .mp-section { margin: 10px 0 4px; }
+  .mp-section:first-child { margin-top: 0; }
   .md-body { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
   .md-media img, .md-media video { width: 100%; display: block; max-height: 65vh; object-fit: contain; background: var(--muted); }
   @media (max-width: 720px) { .md-body { grid-template-columns: 1fr; } }

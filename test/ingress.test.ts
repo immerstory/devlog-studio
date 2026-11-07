@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
-import { collectSessions, commandsIn, digestHash, mergeDigests, readLines } from "../server/ingress/sessions.js";
+import { collectSessions, commandsIn, digestHash, mergeDigests, readLines, type LoggedImage } from "../server/ingress/sessions.js";
 import { redact, shorten, withoutAbsolutePaths } from "../server/ingress/redact.js";
 import { correlate, threadsOf } from "../server/ingress/correlate.js";
 import { collectForgejo, collectGithub, commitUrl, forgejoCall, githubRepo, parseRemote } from "../server/ingress/forge.js";
@@ -400,4 +400,86 @@ test("stopping a log early closes its file, for plain and compressed logs alike"
 test("a log that can't be read fails its reader, and doesn't take the process down", async () => {
   const missing = path.join(home("missing"), "gone.jsonl.zst");
   await assert.rejects(async () => { for await (const _ of readLines(missing)) { /* nothing to read */ } }, /ENOENT/);
+});
+
+const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64").toString("base64");
+const claudeImage = (timestamp: string, text: string, data = PIXEL, extra: object = {}) => ({ type: "user", timestamp, cwd: SOURCE, sessionId: "c1", imagePasteIds: [1], message: { role: "user", content: [{ type: "text", text }, { type: "image", source: { type: "base64", media_type: "image/png", data } }] }, ...extra });
+const codexImage = (timestamp: string, text: string, data = PIXEL) => ({ type: "response_item", timestamp, payload: { type: "message", role: "user", content: [{ type: "input_text", text }, { type: "input_text", text: '<image name=[Image #1] path="C:\private\shot.png">' }, { type: "input_image", image_url: `data:image/png;base64,${data}` }, { type: "input_text", text: "</image>" }] } });
+async function imagesOf(connector: "claude-sessions" | "codex-sessions", root: string, cursor?: Record<string, unknown>, terms?: string[]) {
+  const images: LoggedImage[] = [];
+  const { records, cursor: next } = await collect(collectSessions(connector, sources, { root, cursor: cursor as never, terms, onImage: async (image) => void images.push(image) }));
+  return { images, records, cursor: next };
+}
+
+test("images in a developer's Claude messages are collected, and a tool's are not", async () => {
+  const root = home("images-claude");
+  write(path.join(root, ".claude", "projects", "encoded", "c1.jsonl"), lines([
+    claudeImage(at(10), "The bike clips through the fence, key sk-abcdefghijklmnopqrstuvwxyz1234"),
+    { type: "user", timestamp: at(10, 1), cwd: SOURCE, toolUseResult: {}, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: PIXEL } }] }] } },
+    claudeImage(at(10, 2), "from a subagent", PIXEL, { isSidechain: true }),
+    claudeImage(at(10, 3), "meta", PIXEL, { isMeta: true }),
+  ]));
+  const { images, records } = await imagesOf("claude-sessions", root);
+  assert.equal(images.length, 1);
+  const [image] = images;
+  assert.equal(image.tool, "claude");
+  assert.equal(image.mediaType, "image/png");
+  assert.equal(image.base64, PIXEL);
+  assert.equal(image.sourceId, "s1");
+  assert.match(image.message, /^The bike clips through the fence/);
+  assert.doesNotMatch(image.message, /sk-abcdef/);
+  assert.equal(image.recordId, records[0].id);
+});
+
+test("images in a developer's Codex messages keep the words and drop the local path", async () => {
+  const root = home("images-codex");
+  const id = "01a0b087-e2dc-7fd2-b05d-e31a12263525";
+  write(path.join(root, ".codex", "sessions", "2026", "11", "03", `rollout-2026-11-03T10-00-00-${id}.jsonl`), lines([
+    { type: "session_meta", timestamp: at(9), payload: { cwd: SOURCE, thread_source: "user" } },
+    codexImage(at(10), "\n# Files mentioned by the user:\n\n## shot.png: C:\private\shot.png\n\n## My request for Codex:\nThe fence looks wrong\n"),
+    { type: "response_item", timestamp: at(10, 1), payload: { type: "function_call_output", output: [{ type: "input_image", image_url: `data:image/png;base64,${PIXEL}` }] } },
+    codexImage(at(10, 2), "\n# Files mentioned by the user:\n\n## only.png: C:\private\only.png\n"),
+  ]));
+  const { images } = await imagesOf("codex-sessions", root);
+  assert.equal(images.length, 2);
+  assert.equal(images[0].tool, "codex");
+  assert.equal(images[0].message, "The fence looks wrong");
+  assert.equal(images[1].message, "");
+  assert.equal(images[0].base64, PIXEL);
+});
+
+test("a read that doesn't ask for images keeps none and treats a large image line as oversized", async () => {
+  const root = home("images-off");
+  const big = "A".repeat(5 * 1024 * 1024);
+  write(path.join(root, ".claude", "projects", "encoded", "c1.jsonl"), lines([claudeUser(at(10), "Start"), claudeImage(at(10, 1), "Big screenshot", big)]));
+  const plain = await collect(collectSessions("claude-sessions", sources, { root }));
+  assert.equal(plain.skipped, 1);
+  const { images } = await imagesOf("claude-sessions", root);
+  assert.equal(images.length, 1);
+  assert.equal(images[0].base64.length, big.length);
+});
+
+test("images follow the log's cursor, and other projects and the app's own runs add none", async () => {
+  const root = home("images-cursor");
+  const file = path.join(root, ".claude", "projects", "encoded", "c1.jsonl");
+  write(file, lines([claudeImage(at(10), "First")]));
+  const first = await imagesOf("claude-sessions", root);
+  assert.deepEqual(first.images.map((i) => i.message), ["First"]);
+  assert.equal((await imagesOf("claude-sessions", root, first.cursor)).images.length, 0);
+  fs.appendFileSync(file, lines([claudeImage(at(11), "Second")]));
+  assert.deepEqual((await imagesOf("claude-sessions", root, first.cursor)).images.map((i) => i.message), ["Second"]);
+
+  const other = home("images-other");
+  write(path.join(other, ".claude", "projects", "a", "other.jsonl"), lines([{ ...claudeImage(at(10), "Other work"), cwd: path.join(path.parse(SOURCE).root, "other-project") }]));
+  write(path.join(other, ".claude", "projects", "b", "run.jsonl"), lines([claudeImage(at(10), `${AGENT_RUN_MARKER} write a script`)]));
+  assert.equal((await imagesOf("claude-sessions", other)).images.length, 0);
+});
+
+test("an image of a session that counts as other work says so", async () => {
+  const root = home("images-other-work");
+  write(path.join(root, ".claude", "projects", "encoded", "c1.jsonl"), lines([
+    claudeImage(at(10), "Look at this"),
+    claudeTool(at(10, 1), "t1", "Edit", { file_path: path.join(path.parse(SOURCE).root, "other-project", "x.ts"), old_string: "a", new_string: "b" }),
+  ]));
+  assert.equal((await imagesOf("claude-sessions", root)).images[0].otherWork, true);
 });

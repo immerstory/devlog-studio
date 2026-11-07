@@ -4,6 +4,7 @@ import { ListInput } from "@/components/list-input";
 import { api, projectHref, fmtDate, useJob, type AppState } from "./api";
 import { usePersistent } from "./persistent";
 import { MaterialAttach } from "./Materials";
+import { sessionPeriod } from "./SessionImages";
 import { DayActivity, NewSuggestion, emptyDraft, type DayDraft } from "./GitDay";
 import { PopOutButton, PopOutDialog } from "./PopOut";
 import { CommitList } from "./CommitLinks";
@@ -582,7 +583,7 @@ export function SuggestionCard(props: {
         </label>
       </div>
       <div className="label">Materials</div>
-      <MaterialAttach attached={s.materialIds} all={materials} onChange={(ids) => onPatch({ materialIds: ids })} attach={{ suggestionId: s.id }} defaultDate={s.workDate} onUploaded={reload} onEdited={reload} />
+      <MaterialAttach attached={s.materialIds} all={materials} onChange={(ids) => onPatch({ materialIds: ids })} attach={{ suggestionId: s.id }} defaultDate={s.workDate} onUploaded={reload} onEdited={reload} sessions={{ records: s.sources.sessions, ...sessionPeriod([s.workDate]) }} />
       {s.sources.commits.length ? <CommitList commits={s.sources.commits} /> : null}
       {s.sources.sessions?.length ? <div className="muted small">Sessions: {s.sources.sessions.length}</div> : null}
       {s.possibleRepeatOf ? <div className="muted small">Shares commits with "{s.possibleRepeatOf}". Dismiss this one if it tells the same story.</div> : null}

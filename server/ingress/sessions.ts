@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import zlib from "node:zlib";
-import { looksLikeOtherWork, sessionTitleOf, type ActivityRecord, type SessionDigest } from "../../shared/activity.js";
+import { looksLikeOtherWork, sessionTitleOf, type ActivityRecord, type ActivitySource, type SessionDigest } from "../../shared/activity.js";
 import type { CollectEvent, FileCursor, IngressConnector, SourceCandidate } from "./provider.js";
 import { AGENT_RUN_MARKER } from "../agent.js";
 import { localDate } from "./provider.js";
@@ -13,6 +13,9 @@ import { redact, shorten, withoutAbsolutePaths } from "./redact.js";
 
 const run = promisify(execFile);
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
+/** A message with several full-size screenshots holds them in one line. */
+const MAX_IMAGE_LINE_BYTES = 64 * 1024 * 1024;
+const IMAGE_MESSAGE_LENGTH = 2000;
 const LISTS = { files: 200, commands: 60, prompts: 40, checks: 40 };
 const PROMPT_LENGTH = 600;
 /** Below this share of recognized lines, a log's format counts as unsupported. */
@@ -35,7 +38,7 @@ const TOOL_FOLDERS = [os.tmpdir(), path.join(os.homedir(), ".claude"), path.join
  * Streams a log's lines with their end offsets. Oversized lines are counted and skipped, and an unfinished last line
  * waits for the next run. Stopping early closes the file, and a read error reaches the caller instead of the process.
  */
-export async function* readLines(file: string, startOffset = 0, opened?: (source: ReadStream) => void): AsyncGenerator<{ line?: Buffer; offset: number }> {
+export async function* readLines(file: string, startOffset = 0, opened?: (source: ReadStream) => void, maxLineBytes = MAX_LINE_BYTES): AsyncGenerator<{ line?: Buffer; offset: number }> {
   const compressed = file.endsWith(".zst");
   const source = createReadStream(file, compressed ? {} : { start: startOffset });
   opened?.(source);
@@ -55,7 +58,7 @@ export async function* readLines(file: string, startOffset = 0, opened?: (source
         offset += piece.length + (end < 0 ? 0 : 1);
         if (!oversized) {
           size += piece.length;
-          if (size > MAX_LINE_BYTES) { oversized = true; parts = []; } else parts.push(Buffer.from(piece));
+          if (size > maxLineBytes) { oversized = true; parts = []; } else parts.push(Buffer.from(piece));
         }
         if (end < 0) break;
         at = end + 1;
@@ -99,6 +102,22 @@ export function commandsIn(line: string): { git: string[]; checks: string[] } {
 }
 
 export interface SessionSource { id: string; label: string; roots: string[] }
+/** An image from a developer's message, as a log holds it. */
+export interface LoggedImage {
+  at: string;
+  date: string;
+  tool: SessionDigest["tool"];
+  sessionId: string;
+  recordId: string;
+  sourceId: string;
+  sessionTitle?: string;
+  mediaType: string;
+  base64: string;
+  message: string;
+  otherWork: boolean;
+}
+/** The developer's words in a message, without what tools wrap around them. */
+const cleanPrompt = (text: string) => text.replace(/&#x20;/g, " ").replace(/<pasted_content[\s\S]*?<\/pasted_content[^>]*>/g, "[pasted]").replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").replace(ATTACHED_FILES, "").replace(QUOTED_LINE, "").trim();
 const sourceFor = (sources: SessionSource[], cwd: string) => sources.find((s) => s.roots.some((r) => inside(r, cwd)));
 
 /** One day of a session while its log is read. */
@@ -118,6 +137,9 @@ class SessionReader {
   firstPromptSeen = false;
   /** Commands waiting for their result, by tool call ID. */
   pending = new Map<string, string>();
+  /** Images of the developer's messages. Collected only on request, because a log's images are large. */
+  images: Array<{ at: string; mediaType: string; base64: string; message: string }> = [];
+  keepImages = false;
   lines = 0;
   recognized = 0;
   skipped = 0;
@@ -142,7 +164,7 @@ class SessionReader {
     return redact(withoutAbsolutePaths(text, this.source?.roots), this.terms);
   }
   prompt(at: string, text: string) {
-    const clean = text.replace(/&#x20;/g, " ").replace(/<pasted_content[\s\S]*?<\/pasted_content[^>]*>/g, "[pasted]").replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").replace(ATTACHED_FILES, "").replace(QUOTED_LINE, "").trim();
+    const clean = cleanPrompt(text);
     if (!clean || clean.startsWith("<")) return;
     // Wrapped context such as environment details comes first, so the first prompt is the first plain one.
     if (!this.firstPromptSeen) {
@@ -152,6 +174,11 @@ class SessionReader {
     if (clean.startsWith("This session is being continued")) return;
     const d = this.day(at).digest;
     if (d.prompts.length < LISTS.prompts) d.prompts.push(shorten(this.safe(clean), PROMPT_LENGTH));
+  }
+  image(at: string, mediaType: string, base64: string, words: string) {
+    if (!this.keepImages) return;
+    const clean = cleanPrompt(words);
+    this.images.push({ at, mediaType, base64, message: clean.startsWith("<") ? "" : shorten(this.safe(clean), IMAGE_MESSAGE_LENGTH) });
   }
   file(at: string, file: string) {
     if (!this.source || !path.isAbsolute(file)) { if (this.source && file) this.addFile(at, file); return; }
@@ -219,7 +246,11 @@ function readClaudeLine(r: SessionReader, o: Record<string, any>) {
   const content = o.message?.content;
   if (o.type === "user" && !o.isMeta && !o.isSidechain && !o.isCompactSummary) {
     if (typeof content === "string") r.prompt(at, content);
-    else if (Array.isArray(content) && !("toolUseResult" in o)) for (const b of content) if (b?.type === "text") r.prompt(at, b.text ?? "");
+    else if (Array.isArray(content) && !("toolUseResult" in o)) {
+      for (const b of content) if (b?.type === "text") r.prompt(at, b.text ?? "");
+      const words = content.filter((b) => b?.type === "text").map((b) => b.text ?? "").join("\n");
+      for (const b of content) if (b?.type === "image" && b.source?.type === "base64" && typeof b.source.data === "string") r.image(at, b.source.media_type ?? "", b.source.data, words);
+    }
   }
   if (!Array.isArray(content)) { r.day(at); return; }
   for (const b of content) {
@@ -242,6 +273,10 @@ function codexCommandText(command: unknown): string {
   if (Array.isArray(command)) return command.join(" ");
   return typeof command === "string" ? command : "";
 }
+
+/** Codex wraps each attached image in tags that name its local path. */
+const CODEX_IMAGE_TAG = /^\s*<\/?image\b/;
+const DATA_URL = /^data:([\w/+.-]+);base64,/;
 
 function readCodexLine(r: SessionReader, o: Record<string, any>) {
   const at = o.timestamp;
@@ -278,6 +313,13 @@ function readCodexLine(r: SessionReader, o: Record<string, any>) {
     }
     r.day(at);
     return;
+  }
+  if (o.type === "response_item" && p.type === "message" && p.role === "user" && r.keepImages && Array.isArray(p.content)) {
+    const words = p.content.filter((b: { type?: string; text?: string }) => b?.type === "input_text" && !CODEX_IMAGE_TAG.test(b.text ?? "")).map((b: { text?: string }) => b.text ?? "").join("\n");
+    for (const b of p.content) {
+      const url = b?.type === "input_image" && typeof b.image_url === "string" ? DATA_URL.exec(b.image_url) : null;
+      if (url) r.image(at, url[1], b.image_url.slice(url[0].length), words);
+    }
   }
   if (o.type === "response_item" || o.type === "token_usage_record" || o.type === "world_state" || o.type === "compacted") r.recognized++;
 }
@@ -322,7 +364,7 @@ async function codexFiles(root: string): Promise<LogFile[]> {
 export async function* collectSessions(
   connector: "claude-sessions" | "codex-sessions",
   sources: SessionSource[],
-  options: { root?: string; from?: string; cursor?: Record<string, FileCursor>; terms?: string[] },
+  options: { root?: string; from?: string; cursor?: Record<string, FileCursor>; terms?: string[]; onImage?: (image: LoggedImage) => Promise<void> },
 ): AsyncGenerator<CollectEvent> {
   const tool = connector === "claude-sessions" ? "claude" : "codex";
   const root = options.root ?? os.homedir();
@@ -337,6 +379,7 @@ export async function* collectSessions(
     if (seen && seen.size === f.size && seen.mtimeMs === f.mtimeMs) continue;
     if (f.mtimeMs < fromMs) continue;
     const reader = new SessionReader(tool, f.sessionId, options.terms ?? []);
+    reader.keepImages = !!options.onImage;
     const start = seen && !f.file.endsWith(".zst") && !seen.skip && f.size > seen.size ? seen.offset : 0;
     // Resuming a log: its project is already known, and its first prompt was already seen.
     if (start) { reader.source = sources.find((s) => s.id === seen!.sourceId); reader.firstPromptSeen = true; reader.title = seen!.title; reader.branch = seen!.branch; reader.repo = seen!.repo; }
@@ -344,7 +387,7 @@ export async function* collectSessions(
     let skip = false;
     const isSubagent = tool === "claude" && f.file.includes(`${path.sep}subagents${path.sep}`);
     if (isSubagent) reader.firstPromptSeen = true;
-    for await (const { line, offset: end } of readLines(f.file, start)) {
+    for await (const { line, offset: end } of readLines(f.file, start, undefined, options.onImage ? MAX_IMAGE_LINE_BYTES : MAX_LINE_BYTES)) {
       offset = end;
       reader.lines++;
       if (!line) { reader.skipped++; continue; }
@@ -372,9 +415,18 @@ export async function* collectSessions(
     }
     if (reader.lines >= MIN_LINES_FOR_FORMAT_CHECK && reader.recognized / reader.lines < MIN_RECOGNIZED) yield { unsupported: path.basename(f.file) };
     if (reader.skipped) yield { skippedLines: reader.skipped };
-    for (const record of records(reader, connector)) {
+    const found = records(reader, connector);
+    for (const record of found) {
       if (options.from && record.date < options.from) continue;
       yield { record };
+    }
+    if (options.onImage) {
+      const otherWork = new Set(found.filter((r) => r.visibility === "excluded").map((r) => r.date));
+      const sessionTitle = reader.title ? shorten(reader.safe(reader.title), 90) : undefined;
+      for (const image of reader.images) {
+        const date = localDate(image.at);
+        await options.onImage({ ...image, date, tool, sessionId: reader.sessionId, recordId: `${connector}:${reader.sessionId}:${date}`, sourceId: reader.source.id, sessionTitle, otherWork: otherWork.has(date) });
+      }
     }
     cursor[f.file] = { size: f.size, mtimeMs: f.mtimeMs, offset, sourceId: reader.source.id, title: reader.title, branch: reader.branch, repo: reader.repo };
   }
@@ -410,6 +462,15 @@ async function logHead(f: LogFile, tool: SessionDigest["tool"]) {
   const head = { mtimeMs: f.mtimeMs, cwd: reader.cwd, agentRun: reader.agentRun };
   logHeads.set(f.file, head);
   return head;
+}
+
+/** Passes each image from new log lines to `onImage`, and returns the cursor for the next run. */
+export async function readSessionImages(connector: "claude-sessions" | "codex-sessions", project: Parameters<typeof sessionSources>[0], source: ActivitySource, cursor: unknown, onImage: (image: LoggedImage) => Promise<void>) {
+  let next = cursor;
+  for await (const event of collectSessions(connector, await sessionSources(project), { cursor: cursor as Record<string, FileCursor> | undefined, terms: source.redactTerms, onImage })) {
+    if ("cursor" in event) next = event.cursor;
+  }
+  return next;
 }
 
 /** Counts a project's sessions for a tool, reading only each log's start. */

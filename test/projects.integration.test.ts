@@ -31,11 +31,29 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
   try {
     await migrate(); await loadConfig(); await loadProjects();
     assert.equal(listProjects().length, 0, "fresh install has no project");
-    assert.equal((await query("SELECT * FROM schema_migrations")).length, 1);
+    const migrations = (await query("SELECT * FROM schema_migrations")).length;
     await migrate();
-    assert.equal((await query("SELECT * FROM schema_migrations")).length, 1, "a second run changes nothing");
+    assert.equal((await query("SELECT * FROM schema_migrations")).length, migrations, "a second run changes nothing");
     const one = await createProject({ name: "Test One", sourcePath: process.cwd() });
     const two = await createProject({ name: "Test Two", sourcePath: process.cwd() });
+    {
+      const { listSessionImages, setSessionImageStatus } = await import("../server/sessionImages.js");
+      const image = (id: string, recordId: string, extra: object = {}) => ({ id, recordId, at: `2026-11-03T10:00:${id.slice(-2)}Z`, status: "inbox", ...extra });
+      for (const row of [image("si-01", "claude-sessions:shown:2026-11-03"), image("si-02", "claude-sessions:excluded:2026-11-03"), image("si-03", "claude-sessions:unread:2026-11-03", { otherWork: true }), image("si-04", "claude-sessions:unread:2026-11-03"), image("si-05", "claude-sessions:shown:2026-11-03", { status: "added", materialId: "mat-1" })]) {
+        await query("INSERT INTO session_images (project_id, id, date, data) VALUES ($1, $2, '2026-11-03', $3)", [one.id, row.id, row]);
+      }
+      for (const [id, visibility] of [["claude-sessions:shown:2026-11-03", "private"], ["claude-sessions:excluded:2026-11-03", "excluded"]]) {
+        await query("INSERT INTO activity (project_id, id, date, data) VALUES ($1, $2, '2026-11-03', $3)", [one.id, id, { id, kind: "session", visibility }]);
+      }
+      assert.deepEqual((await listSessionImages(one.id)).map((i) => i.id).sort(), ["si-01", "si-04"], "an excluded session, other work without a record and added images stay out");
+      assert.deepEqual(await listSessionImages(two.id), [], "images belong to one project");
+      await inContext({ projectId: one.id }, async () => {
+        assert.equal((await setSessionImageStatus("si-01", "dismissed")).status, "dismissed");
+        assert.equal((await setSessionImageStatus("si-01", "inbox")).status, "inbox");
+        await assert.rejects(setSessionImageStatus("si-05", "inbox"), /no longer in the inbox/);
+      });
+      await query("DELETE FROM activity WHERE project_id = $1", [one.id]);
+    }
     const webapp = await createProject({ name: "Neutral wording", archetype: "webapp", sourcePath: process.cwd() });
     assert.deepEqual(webapp.settings.sources[0].contentGlobs, []);
     const { discoveryPrompt, questionsPrompt, scriptPrompt } = await import("../server/prompts.js");

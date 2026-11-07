@@ -21,7 +21,7 @@ interface Probe {
   durationSeconds?: number;
 }
 
-async function probe(file: string): Promise<Probe> {
+export async function probe(file: string): Promise<Probe> {
   const { stdout } = await run("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration", "-of", "json", file], { windowsHide: true });
   const j = JSON.parse(stdout) as { streams?: Array<{ width?: number; height?: number }>; format?: { duration?: string } };
   const d = Number(j.format?.duration);
@@ -29,7 +29,7 @@ async function probe(file: string): Promise<Probe> {
 }
 
 /** JPEG still at the given width; videos use a frame from their first seconds. */
-async function still(input: string, out: string, width: number, video: boolean, duration?: number) {
+export async function still(input: string, out: string, width: number, video: boolean, duration?: number) {
   const seek = video ? ["-ss", String(Math.min(1, (duration ?? 2) / 2))] : [];
   await run("ffmpeg", ["-y", "-loglevel", "error", ...seek, "-i", input, "-frames:v", "1", "-vf", `scale='min(${width},iw)':-2`, "-q:v", "3", out], { windowsHide: true });
 }

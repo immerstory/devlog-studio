@@ -62,6 +62,38 @@ export interface SessionSummary {
   createdAt: string;
 }
 
+/** An image the developer sent to a coding agent. Only an image the developer adds becomes a material and reaches an agent. */
+export interface SessionImage {
+  /** From the content's hash, so one image is stored once per project. */
+  id: string;
+  createdAt: string;
+  /** Local day of the message. */
+  date: string;
+  /** Time of the message. */
+  at: string;
+  tool: SessionDigest["tool"];
+  sessionId: string;
+  /** The activity record of the session's day. */
+  recordId: string;
+  sourceId: string;
+  sessionTitle?: string;
+  title: string;
+  /** The message's words, cleaned and redacted like a digest's prompts. */
+  message: string;
+  status: "inbox" | "dismissed" | "added";
+  materialId?: string;
+  /** The session counted as other work when the image was read. */
+  otherWork?: boolean;
+  fileName: string;
+  contentType: string;
+  size: number;
+  width?: number;
+  height?: number;
+  key: string;
+  thumbKey: string;
+  previewKey: string;
+}
+
 /** A configured activity source of a project. Git sources are implicit. */
 export interface ActivitySource {
   id: string;
@@ -69,6 +101,8 @@ export interface ActivitySource {
   enabled: boolean;
   /** Terms removed from digests, such as unannounced feature names. */
   redactTerms?: string[];
+  /** A session source also collects the images the developer sent to the agent. They wait in an inbox until the developer decides. */
+  importImages?: boolean;
   /** owner/name, for a forge. */
   repo?: string;
   /** The web address of a self-hosted forge. Its token is stored apart, so it never reaches the client. */

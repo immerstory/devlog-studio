@@ -257,6 +257,12 @@ export function ActivitySourcesSection({ settings, active, onChange }: { setting
           <div key={`${c.connector}${c.repo ?? ""}`}>
             <label className="check"><input type="checkbox" disabled={!c.found} checked={!!source?.enabled} onChange={(e) => change(c, { enabled: e.target.checked })} />{c.label}</label>
             <p className="field-hint">{c.detail}</p>
+            {isSession(c.connector as ActivitySource["connector"]) && source?.enabled ? (
+              <>
+                <label className="check"><input type="checkbox" checked={!!source.importImages} onChange={(e) => change(c, { importImages: e.target.checked })} />Import screenshots I sent</label>
+                <p className="field-hint">Stores the images you sent to this tool. They wait under Materials &gt; From sessions until you add them, and agents can't see them there. Saving with this option on reads the older logs once.</p>
+              </>
+            ) : null}
             {c.connector === "forgejo" && source?.enabled ? <ForgeFields candidate={c} source={source} onAddress={(baseUrl) => change(c, { baseUrl })} /> : null}
           </div>
         );

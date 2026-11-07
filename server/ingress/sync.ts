@@ -14,6 +14,7 @@ import { forgejoCall, forgejoConnector, forgeTokenKey, githubConnector } from ".
 import type { DateRange, IngressConnector, SourceCandidate } from "./provider.js";
 import { localDate } from "./provider.js";
 import { digestHash, mergeDigests, sessionConnector } from "./sessions.js";
+import { importingSources, importSessionImages } from "../sessionImages.js";
 import { shorten } from "./redact.js";
 
 export function commitRecord(c: CommitEvidence): ActivityRecord {
@@ -133,6 +134,10 @@ export async function syncActivity(range: DateRange, log: (l: string) => void = 
     await setValue(pid, key, { version: CURSOR_VERSION, from: saved && saved.from < range.from ? saved.from : range.from, cursor: next });
     log(`${connector.label}: ${count} record(s).`);
     result.records += count;
+  }
+  if (!only && importingSources(project.activitySources).length) {
+    try { await importSessionImages(log); }
+    catch (err) { const message = `Screenshots: ${(err as Error).message}`; result.errors.push(message); log(message); }
   }
   if (result.unsupported.length) log(`Unsupported log format in ${result.unsupported.length} file(s); they added no data.`);
   result.links = await refreshLinks(pid);

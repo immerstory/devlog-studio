@@ -80,6 +80,9 @@ export async function migrate() {
     const example = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../config/studio.example.json"), "utf8")) as StudioConfig;
     await c.query("INSERT INTO settings (key, value) VALUES ('global', $1)", [globalFromStudio(example)]);
   });
+  await applyMigration(2, async (c) => {
+    await c.query("CREATE TABLE session_images (project_id text NOT NULL REFERENCES projects(id), id text NOT NULL, date date NOT NULL, data jsonb NOT NULL, PRIMARY KEY (project_id, id))");
+  });
 }
 
 export async function applyMigration(version: number, work: (c: pg.PoolClient) => Promise<void>) {
