@@ -1052,7 +1052,7 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
       seg.captureError = seg.visual.materialId ? undefined : "Record this footage, upload it as a material and choose it here.";
       continue;
     }
-    if (seg.visual.type !== "capture") continue;
+    if (seg.visual.type !== "capture") { seg.captureError = undefined; continue; }
     if (currentJobSignal()?.aborted) { cancelled = true; break; }
     log(`Capturing ${seg.visual.description.slice(0, 70)}…`);
     try {

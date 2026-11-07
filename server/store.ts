@@ -178,7 +178,8 @@ export function saveScript(pid: string, id: string, format: Format, script: Scri
       segment.media = saved?.media;
       segment.mediaSeconds = saved?.mediaSeconds;
       segment.capturedAt = saved?.capturedAt;
-      segment.captureError = saved?.captureError;
+      // A capture error belongs to the kind of visual it was made for; a segment that turned into another kind drops it.
+      segment.captureError = saved?.visual.type === segment.visual.type ? saved.captureError : undefined;
       segment.takes = saved?.takes;
     }
     const takes = post.narration[format];

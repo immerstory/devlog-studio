@@ -170,6 +170,13 @@ export function scriptMaterialIds(segments: Segment[]): string[] {
 }
 
 /** `theme` replaces the saved theme, for previews of unsaved settings. */
+/** The credit of a material an image generator made, so the video never passes it off as footage. */
+export const GENERATED_CREDIT = "AI-generated image";
+function generatedCredit(visual: Segment["visual"], materials: Map<string, Material>): TimelineSegment["source"] {
+  const material = visual.type === "material" && visual.materialId ? materials.get(visual.materialId) : undefined;
+  return material?.generated ? { credit: GENERATED_CREDIT } : undefined;
+}
+
 /** The source a segment shows: a slide's credit, or the page a webpage shot films, resolved against its target's base URL, unless the shot leaves the link out. */
 export function pageSource(visual: Segment["visual"]): TimelineSegment["source"] {
   if (visual.type === "slide") return visual.credit?.trim() ? { credit: visual.credit.trim() } : undefined;
@@ -269,7 +276,7 @@ export async function buildTimeline(ep: Post, format: Format, narrated: boolean,
       stackStaggerFrames: stackCount ? stackStagger(stackCount, speechMs, fps) : undefined,
       audio: audio.length ? audio : undefined,
       introFrames: startMs ? Math.round((startMs / 1000) * fps) : undefined,
-      source: pageSource(seg.visual),
+      source: pageSource(seg.visual) ?? generatedCredit(seg.visual, materials),
     });
     for (const { turn, words, atMs } of lines) {
       const visible = captionWords(words);

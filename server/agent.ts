@@ -39,7 +39,7 @@ export async function runAgent<T>(opts: AgentOptions): Promise<AgentRun<T>> {
   return agent === "codex" ? runCodex<T>(marked) : runClaude<T>(marked);
 }
 
-function spawnCollect(cmd: string, args: string[], stdin: string, log?: Log): Promise<{ stdout: string; stderr: string; code: number }> {
+export function spawnCollect(cmd: string, args: string[], stdin: string, log?: Log): Promise<{ stdout: string; stderr: string; code: number }> {
   const timeoutMs = config().agent.timeoutMinutes * 60_000;
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: getProject().settings.sources.find((s) => s.id === getProject().settings.primarySourceId)!.path, windowsHide: true, env: process.env });

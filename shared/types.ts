@@ -139,6 +139,8 @@ export interface Material {
   tags: string[];
   /** Group name. Materials with the same group belong together, for example a series of drafts shown as one polaroid stack. */
   group?: string;
+  /** Set when an image generator made it; the video then credits it as generated. */
+  generated?: { tool: "codex"; prompt: string };
 }
 
 export interface MaterialDeletion { deleted: true; warning?: string }

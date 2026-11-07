@@ -252,6 +252,7 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
     api<{ checks: Record<string, PageCheck | null>; unlisted: string[] }>(`/api/posts/${ep.id}/links/${format}`).then(setPageChecks, () => setPageChecks({ checks: {}, unlisted: [] }));
   }, [ep, format, busy]);
   const hasPages = !!script?.segments.some((s) => s.visual.type === "capture" && s.visual.shot.model === "page");
+  const missingImages = script?.segments.filter((s) => s.visual.type === "material" && !s.visual.materialId && s.visual.description.trim()).length ?? 0;
 
   const update = (fn: (s: Script) => void) => {
     if (!script) return;
@@ -317,6 +318,12 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
         {dirty ? <span className="small" style={{ color: "var(--highlight)" }}>Unsaved changes</span> : null}
         {script ? <span className="muted">{script.segments.length} segments · {words} words · ≈{Math.round(words / 2.5)} s</span> : null}
         <span className="grow" />
+        {missingImages ? (
+          <Button variant="outline" disabled={busy} title="Codex generates an image for each material segment without one, from its description. The video credits each as an AI-generated image." onClick={() => { setPending({ action: "images" }); runSaved(`/api/posts/${ep.id}/images/${format}`); }}>
+            {pending?.action === "images" ? <Spinner /> : null}
+            {pending?.action === "images" ? "Generating images…" : `Generate missing images (${missingImages})`}
+          </Button>
+        ) : null}
         {hasPages ? (
           <Button variant="outline" disabled={busy} title={dirty ? "Saves your edits, then opens each webpage shot's page without filming it" : "Opens each webpage shot's page without filming it"} onClick={() => { setPending({ action: "links" }); runSaved(`/api/posts/${ep.id}/links/${format}`); }}>
             {pending?.action === "links" ? <Spinner /> : null}
@@ -430,6 +437,8 @@ function SegmentEditor(props: {
 }) {
   const { ep, seg, index, all, epMaterials, allMaterials, busy, pending, onStart, format, onChange, onMove, onHandle, onDelete, run, onPreviousTake, pageCheck, linkUnlisted } = props;
   const takes = seg.takes?.[format] ?? [];
+  // Slides aren't captured, and a material segment's note to record its footage is stale once a material is chosen.
+  const captureError = seg.visual.type === "slide" || (seg.visual.type === "material" && seg.visual.materialId) ? undefined : seg.captureError;
   const takeButton = takes.length > 1 ? (
     <Button
       variant="ghost"
@@ -486,7 +495,7 @@ function SegmentEditor(props: {
     if (type === "slide") setVisual({ type, layout: "bullets", heading: "" });
   };
   return (
-    <div className={`segment ${seg.captureError ? "has-error" : ""}`}>
+    <div className={`segment ${captureError ? "has-error" : ""}`}>
       <div className="seg-index">
         <span>{index + 1}</span>
         <span
@@ -652,6 +661,12 @@ function SegmentEditor(props: {
               <ImageStrip ids={v.materialId ? [v.materialId] : []} items={materialItems} max={1} onChange={(ids) => setVisual({ ...v, materialId: ids[0], framing: undefined })} onAdd={() => setPicker("material")} onTileClick={() => setPicker("material")} />
               {chosen?.kind === "video" ? <label className="small">Start at<input className="numin" type="number" step="0.1" min="0" value={v.trimStart ?? 0} onChange={(e) => setVisual({ ...v, trimStart: Number(e.target.value) })} title="Start offset in seconds" /></label> : null}
               <a href={projectHref("/materials")} className="small">upload in Materials</a>
+              {v.description.trim() && (!chosen || chosen.generated) ? (
+                <Button variant="outline" size="sm" disabled={busy} title="Codex generates an image from the description and adds it to the materials. The video credits it as an AI-generated image." onClick={() => { onStart("image"); run(`/api/posts/${ep.id}/images/${format}`, { segmentId: seg.id }); }}>
+                  {pending === "image" ? <Spinner /> : null}
+                  {pending === "image" ? "Generating…" : chosen ? "Generate again" : "Generate image"}
+                </Button>
+              ) : null}
             </div>
             <MediaPicker
               open={picker === "material"}
@@ -727,7 +742,7 @@ function SegmentEditor(props: {
             })() : null}
           </>
         ) : null}
-        {seg.captureError && !pending ? <div className="error small">{seg.captureError}</div> : null}
+        {captureError && !pending ? <div className="error small">{captureError}</div> : null}
       </div>
       <div className={`seg-thumb ${pending ? "working" : ""}`}>
         {videoSrc ? (

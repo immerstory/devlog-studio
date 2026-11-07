@@ -35,7 +35,7 @@ export async function still(input: string, out: string, width: number, video: bo
 }
 
 /** Stores an uploaded file as a material: original, thumbnail and preview go to Garage. */
-export async function ingestFile(file: string, fileName: string, fields: Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group">>): Promise<Material> {
+export async function ingestFile(file: string, fileName: string, fields: Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group" | "generated">>): Promise<Material> {
   const video = VIDEO.test(fileName);
   if (!video && !IMAGE.test(fileName)) throw Object.assign(new Error(`Unsupported file type: ${fileName}`), { status: 400 });
   const id = newId("mat");
@@ -63,6 +63,7 @@ export async function ingestFile(file: string, fileName: string, fields: Partial
     annotation: fields.annotation?.trim() ?? "",
     tags: fields.tags ?? [],
     group: normalizeGroup(fields.group),
+    ...(fields.generated ? { generated: fields.generated } : {}),
   };
   await putFile(m.key, file);
   await putFile(m.thumbKey, thumb);

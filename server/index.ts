@@ -80,6 +80,7 @@ import { listFolders } from "./folders.js";
 import { serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
 import { checkPostLinks, pageChecks } from "./capture/browser/checks.js";
+import { generateSegmentImages } from "./imagegen.js";
 import { armIntake, DEFAULT_INTAKE, intakeInfo, isIntakeTime, scheduleIntake, startIntake } from "./intake.js";
 import { importBumperAudio, removeBumperAudio } from "./bumperAudio.js";
 import { isThemeFileKind, storeThemeFile } from "./themeFiles.js";
@@ -384,6 +385,7 @@ const epJob = (kind: string, work: (req: Request, log: (l: string) => void) => P
 
 projectApi.get("/posts/:id/links/:format", h(async (req) => pageChecks(await loadPost(projectId(), param(req, "id")), fmt(req))));
 projectApi.post("/posts/:id/links/:format", epJob("links", async (req, log) => checkPostLinks(await loadPost(projectId(), param(req, "id")), fmt(req), log)));
+projectApi.post("/posts/:id/images/:format", epJob("imagegen", (req, log) => generateSegmentImages(param(req, "id"), fmt(req), log, typeof req.body?.segmentId === "string" ? req.body.segmentId : undefined)));
 projectApi.post("/posts/:id/questions", epJob("questions", (req, log) => askQuestions(param(req, "id"), log, agentOf(req))));
 projectApi.post("/posts/:id/script/:format", epJob("script", (req, log) => writeScript(param(req, "id"), fmt(req), log, agentOf(req))));
 /** Back to the previous capture of a segment, with the settings that produced it. */
