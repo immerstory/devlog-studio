@@ -9,6 +9,7 @@ import { useProjectRuntimeSettings } from "./Settings";
 import { api, type AppState, type Job } from "./api";
 import { DEFAULT_PAGE_HEADERS, type BrowserTargetConfig, type CaptureTarget, type GlobalSettings, type Project, type PublicConnection, type UnityTargetConfig } from "../shared/projects";
 import { PathField } from "./PathField";
+import { IntakeScheduleSection } from "./IntakeSchedule";
 import { ArchetypePicker, PromptGuidanceField } from "./ArchetypeFields";
 import { CoHostSection } from "./CoHostFields";
 import { ActivitySourcesSection, EgressConnectionsSection } from "./PublishViews";
@@ -135,6 +136,8 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
       </SettingsSection>
 
       <ActivitySourcesSection settings={s} active={tab === "sources"} onChange={(sources) => edit((p) => { p.settings.activitySources = sources; })} />
+
+      <IntakeScheduleSection value={s.intake} saved={project.settings.intake} onChange={(intake) => edit((p) => { p.settings.intake = intake; })} />
 
       {runtime.sections?.discovery}
       </div>

@@ -59,6 +59,24 @@ export interface CoHostSettings {
   /** Absent means the default line in the published description. {name} stands for the co-host's name. */
   disclosure?: string;
 }
+/** Refreshing activity always runs. The steps that call an agent run only when they are ticked. */
+export interface IntakeSchedule {
+  enabled: boolean;
+  /** Local time of day, HH:MM. */
+  time: string;
+  propose: boolean;
+  review: boolean;
+}
+/** What the scheduler last did for a project. */
+export interface IntakeState {
+  /** Local date of the last time that was due. That day doesn't run again, even after a change of time. */
+  day: string;
+  startedAt?: string;
+  finishedAt?: string;
+  jobId?: string;
+  status?: "running" | "done" | "failed";
+  errors?: string[];
+}
 export interface ProjectSettings {
   name: string;
   publicTitle: string;
@@ -75,6 +93,8 @@ export interface ProjectSettings {
   coHost?: CoHostSettings;
   /** Connected activity beyond the project's Git sources. All are off until the developer turns them on. */
   activitySources?: ActivitySource[];
+  /** A daily run of the intake while the app runs. Off when absent. */
+  intake?: IntakeSchedule;
   theme: StudioConfig["theme"];
   publishing: Omit<StudioConfig["youtube"], "clientId" | "clientSecret" | "refreshToken" | "channelTitle" | "statsIntervalHours"> & {
     attribution: string;

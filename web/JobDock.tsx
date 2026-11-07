@@ -13,6 +13,7 @@ const KIND_LABEL: Record<string, string> = {
   activity: "Refreshing activity",
   summarize: "Summarizing a session",
   sessionImages: "Importing screenshots",
+  intake: "Daily intake",
   social: "Writing a post",
   article: "Writing an article",
   verify: "Checking co-host lines",

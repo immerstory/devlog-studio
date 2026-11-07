@@ -79,6 +79,7 @@ import { handleUpload, removeMaterial } from "./materials.js";
 import { listFolders } from "./folders.js";
 import { serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
+import { armIntake, DEFAULT_INTAKE, intakeInfo, isIntakeTime, scheduleIntake, startIntake } from "./intake.js";
 import { importBumperAudio, removeBumperAudio } from "./bumperAudio.js";
 import { isThemeFileKind, storeThemeFile } from "./themeFiles.js";
 import { loadExtensions } from "./extensions.js";
@@ -329,6 +330,8 @@ projectApi.delete(
 // ---------- images from sessions ----------
 
 projectApi.get("/session-images", h(() => listSessionImages(projectId())));
+projectApi.get("/intake", h(() => intakeInfo()));
+projectApi.post("/intake/run", h(() => startIntake({ ...DEFAULT_INTAKE, ...getProject(projectId()).settings.intake })));
 projectApi.post("/session-images/scan", h(() => startJob("sessionImages", "project", (log) => importSessionImages(log))));
 projectApi.patch("/session-images/:id", h((req) => {
   const status = req.body?.status;
@@ -508,8 +511,12 @@ projectApi.put("/settings/runtime", h(async (req) => {
 projectApi.get("/settings", h(() => getProject()));
 projectApi.get("/sources/usage", h(() => sourceUsage(projectId())));
 projectApi.put("/settings", h(async (req) => {
-  const before = importingSources(getProject(projectId()).settings.activitySources).map((s) => s.id);
+  const previous = getProject(projectId()).settings;
+  const before = importingSources(previous.activitySources).map((s) => s.id);
+  const intake = (req.body.settings as ProjectSettings | undefined)?.intake;
+  if (intake && !isIntakeTime(intake.time)) throw bad("Choose a time of day for the daily intake");
   const saved = await saveProject(projectId(), req.body.settings as ProjectSettings, req.body.slug);
+  if (saved.settings.intake?.enabled && !previous.intake?.enabled) await armIntake(saved.settings.intake.time);
   // Turning the option on reads the logs that were already read for activity.
   if (importingSources(saved.settings.activitySources).some((s) => !before.includes(s.id))) await startJob("sessionImages", "project", (log) => importSessionImages(log));
   return saved;
@@ -653,4 +660,5 @@ app.use(vite.middlewares);
 
 const { port } = config();
 schedulePublishing();
+scheduleIntake();
 app.listen(port, "127.0.0.1", () => console.log(`Devlog Studio: http://localhost:${port}`));
