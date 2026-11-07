@@ -253,7 +253,9 @@ async function mixAudio(t: TimelineProps, footage: FootagePlayer, videoFile: str
   await ffmpeg([
     "-y", "-loglevel", "error", ...inputs, ...(mix ? [] : silence), "-i", videoFile,
     ...(mix ? ["-filter_complex", mix.filter, "-map", "[mix]"] : ["-map", "0:a"]),
-    "-map", `${mix ? sounds.length : 1}:v`, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out,
+    "-map", `${mix ? sounds.length : 1}:v`, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+    // A fixed length ends the file with the video even if the padded mix never signals its end.
+    "-t", seconds.toFixed(3), out,
   ]);
 }
 
@@ -293,16 +295,24 @@ export async function renderVideo(props: TimelineProps, out: string, quality: "d
       running.on("error", reject);
       running.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg failed: ${encoderError.slice(-2000)}`))));
     });
+    // The loop can end before it awaits `encoded`, for example on cancel, which kills the encoder; without a handler
+    // that rejection would be unhandled and end the server.
+    encoded.catch(() => {});
+    let encoderClosed = false;
+    running.on("close", () => (encoderClosed = true));
     // A failed encoder also reports through `encoded`; this only stops the pipe from throwing.
     running.stdin.on("error", () => {});
     let last = -1;
     for (let frame = 0; frame < props.durationInFrames; frame++) {
       if (signal?.aborted) throw new CancelledError();
+      // An encoder that closed early has failed; `encoded` says why.
+      if (encoderClosed) await encoded;
       await footage.advance(frame);
       renderer.draw(ctx, frame);
       // The surface changes with the next frame while the pipe may still queue this one.
       const pixels = Buffer.from(canvas.data());
-      if (!running.stdin.write(pixels)) await new Promise<void>((resolve) => running.stdin.once("drain", resolve));
+      // An encoder that stops never drains, so the wait also ends when it closes; the next write or `encoded` reports why.
+      if (!running.stdin.write(pixels)) await Promise.race([new Promise<void>((resolve) => running.stdin.once("drain", resolve)), encoded.catch(() => {})]);
       // Keeps the server answering between frames.
       await new Promise<void>((resolve) => setImmediate(resolve));
       const pct = Math.floor(((frame + 1) / props.durationInFrames) * 100);
