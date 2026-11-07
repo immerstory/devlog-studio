@@ -8,6 +8,7 @@ import { SegTabs } from "@/components/seg-tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Material, MaterialDeletion } from "../shared/types";
 import { MediaPicker, type MediaItem } from "./MediaPicker";
+import { isMedia, pastedMedia, pasteTarget, UPLOAD_FORM_ATTRIBUTE } from "./paste";
 
 /** Uploads files with shared date, annotation and tags; optional attachment to a suggestion or episode. */
 export async function uploadMaterials(files: File[], fields: { date: string; title?: string; annotation: string; tags: string; group?: string }, attach?: { suggestionId?: string; postId?: string }): Promise<Material[]> {
@@ -83,19 +84,35 @@ export function UploadForm({ attach, defaultDate, onDone, compact }: { attach?: 
   const [err, setErr] = useState("");
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const form = useRef<HTMLDivElement>(null);
   // The form follows its context: switching the selected day moves the upload date with it.
   useEffect(() => {
     if (defaultDate) setDate(defaultDate);
   }, [defaultDate]);
 
-  const add = (list: FileList | null) => {
-    const picked = [...(list ?? [])].filter((f) => /^(image|video)\//.test(f.type) || /\.(png|jpe?g|webp|gif|mp4|mov|webm|mkv)$/i.test(f.name));
+  const add = (list: Iterable<File> | null) => {
+    const picked = [...(list ?? [])].filter(isMedia);
     setFiles((f) => [...f, ...picked]);
     // A file's own date is a better default than today for historical material.
     if (picked[0] && !defaultDate && files.length === 0) setDate(fmtDate(new Date(picked[0].lastModified)));
     // Reset the field so choosing the same file again (after removing it) registers.
     if (input.current) input.current.value = "";
   };
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const clipboard = e.clipboardData;
+      const pasted = pastedMedia([...(clipboard?.files ?? [])], new Date());
+      if (!pasted.length || form.current !== pasteTarget()) return;
+      // Office apps put text and a picture of it on the clipboard; in a text field, the text is what's meant.
+      const inTextField = e.target instanceof HTMLElement && e.target.matches("input, textarea, [contenteditable]");
+      if (inTextField && clipboard?.getData("text/plain")) return;
+      e.preventDefault();
+      add(pasted);
+      form.current?.scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  });
   const clearAll = () => {
     setFiles([]);
     setTitle("");
@@ -120,7 +137,7 @@ export function UploadForm({ attach, defaultDate, onDone, compact }: { attach?: 
   };
 
   return (
-    <div className={`upload ${compact ? "compact" : ""}`}>
+    <div ref={form} {...{ [UPLOAD_FORM_ATTRIBUTE]: "" }} className={`upload ${compact ? "compact" : ""}`}>
       <div
         className={`drop ${over ? "over" : ""}`}
         onClick={() => input.current?.click()}
@@ -142,10 +159,10 @@ export function UploadForm({ attach, defaultDate, onDone, compact }: { attach?: 
                 <FilePreview key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onRemove={() => setFiles((list) => list.filter((_, k) => k !== i))} />
               ))}
             </div>
-            <div className="small">Drop or click to add more</div>
+            <div className="small">Drop, paste or click to add more</div>
           </>
         ) : (
-          "Drop screenshots or videos here, or click to choose"
+          "Drop or paste screenshots or videos here, or click to choose"
         )}
         <input ref={input} type="file" multiple accept="image/*,video/*" hidden onChange={(e) => add(e.target.files)} />
       </div>
