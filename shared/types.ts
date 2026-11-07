@@ -264,6 +264,8 @@ export interface PageShot {
   hide?: string[];
   /** CSS added to the page after it loads, after the capture target's CSS. */
   css?: string;
+  /** JavaScript run in the page after its CSS, before the page settles, for example to start a video the site won't play by itself. */
+  script?: string;
   /** Seconds the page holds still before scrolling and zooming start. */
   delaySeconds?: number;
   /** Average scroll speed in CSS pixels per second; absent spreads the move over the rest of the shot. */
@@ -278,6 +280,13 @@ export interface PageShot {
   hideLink?: boolean;
   /** A sentence the page shows. The page holds still on it and marks it word by word, instead of scrolling. */
   highlight?: string;
+  /** Films the page frame by frame even without a move, so its videos and animations play; otherwise such a shot is one still. */
+  play?: boolean;
+  /**
+   * Films on the page's own clock instead of the exact frame clock, so streamed videos play. A frame the browser can't
+   * deliver in time repeats the one before, so motion may stutter.
+   */
+  realtime?: boolean;
 }
 
 /** What a page showed when it was opened. A failed check names its problem. */
@@ -311,8 +320,8 @@ export function pageMoveProgress(shot: Pick<PageShot, "delaySeconds" | "scrollSp
 export const newPageShot = (url = ""): PageShot => ({ model: "page", url, scrollFrom: 0, scrollTo: 0, zoomFrom: 1, zoomTo: 1, focus: { x: 0.5, y: 0.5 } });
 
 /** A page shot without scrolling or zooming is a single still frame. */
-/** A shot films more than one frame when it scrolls, zooms or highlights a sentence. */
-export const pageShotMoves = (s: PageShot) => String(s.scrollFrom) !== String(s.scrollTo) || s.zoomFrom !== s.zoomTo || !!s.highlight?.trim();
+/** A shot films more than one frame when it scrolls, zooms, highlights a sentence or plays the page. */
+export const pageShotMoves = (s: PageShot) => String(s.scrollFrom) !== String(s.scrollTo) || s.zoomFrom !== s.zoomTo || !!s.highlight?.trim() || !!s.play || !!s.realtime;
 export interface CaptureVisual {
   type: "capture";
   targetId?: string;

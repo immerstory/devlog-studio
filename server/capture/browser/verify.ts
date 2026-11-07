@@ -25,6 +25,20 @@ export function movedTo(requested: string, final: string): string | undefined {
   }
 }
 
+/**
+ * A redirect that means the article is gone: to another site, or to a homepage. Other redirects, such as one that adds
+ * a language to the path, keep the page; the expected text still checks that it shows the article.
+ */
+export function lostPage(requested: string, final: string): string | undefined {
+  try {
+    const a = new URL(requested), b = new URL(final);
+    const home = pathOf(a) !== "/" && /^\/([a-z]{2}([-_][a-z]{2})?\/?)?$/i.test(pathOf(b));
+    return hostOf(a) !== hostOf(b) || home ? b.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Labels of consent buttons that refuse everything optional, in English and German. */
 const REFUSE = /^(reject|decline|deny|refuse)( all| optional| non-essential| additional)?( cookies)?$|^(only|use) (necessary|essential)( cookies)?( only)?$|^(necessary|essential) (cookies )?only$|^(alle )?ablehnen$|^nur (notwendige|erforderliche|essenzielle)( cookies)?( akzeptieren| zulassen)?$/i;
 
@@ -58,24 +72,62 @@ export async function refuseConsent(page: Page): Promise<boolean> {
 }
 
 /**
- * Visible privacy and cookie notices that float over the page: fixed or sticky, short, marked as a dialog, banner or
- * notice, and about cookies, consent or privacy. A page whose whole content sits in a fixed container isn't one.
+ * Visible notices that float over the page: fixed or sticky and short. A modal dialog counts whatever it says, because
+ * it is never the page's content; other floating elements count when they are marked as a banner or notice and are
+ * about cookies, consent, privacy, or the country and language the site suggests. A page whose whole content sits in
+ * a fixed container isn't one.
  * A string, not a function: functions compiled by the TypeScript runner reference helpers the page lacks.
  */
 const NOTICES = `[...document.querySelectorAll("body *")].flatMap((el) => {
   const s = getComputedStyle(el);
   if ((s.position !== "fixed" && s.position !== "sticky") || s.visibility === "hidden" || s.display === "none" || Number(s.opacity) === 0) return [];
   const text = el.innerText || "";
-  if (text.length > 2500 || !/cookie|consent|privacy|datenschutz|einwilligung/i.test(text)) return [];
-  const marked = el.getAttribute("role") === "dialog" || el.getAttribute("aria-modal") === "true" || /cookie|consent|privacy|cmp|gdpr|banner|notice|modal|dialog/i.test(el.id + " " + el.className);
-  if (!marked) return [];
+  if (text.length > 2500) return [];
+  const dialog = el.getAttribute("role") === "dialog" || el.getAttribute("aria-modal") === "true" || !!el.querySelector("[role=dialog], [aria-modal=true]");
+  const notice = /cookie|consent|privacy|cmp|gdpr|banner|notice|modal|dialog/i.test(el.id + " " + el.className) && /cookie|consent|privacy|datenschutz|einwilligung|country|region|language|sprache/i.test(text);
+  if (!dialog && !notice) return [];
   const b = el.getBoundingClientRect();
   const visible = Math.max(0, Math.min(b.right, innerWidth) - Math.max(b.left, 0)) * Math.max(0, Math.min(b.bottom, innerHeight) - Math.max(b.top, 0));
   return visible > 0 ? [{ el, share: visible / (innerWidth * innerHeight), text: text.replace(/\\s+/g, " ").trim() }] : [];
 })`;
 
-/** Hides the privacy notices still floating over the page after the choice. Hiding agrees to nothing. Returns how many. */
-export const hideNotices = (page: Page) => page.evaluate(`(() => { const n = ${NOTICES}; for (const x of n) x.el.style.setProperty("display", "none", "important"); return n.length; })()`) as Promise<number>;
+/**
+ * Short bars in the page that a visitor can close, about the country or language, cookies, a survey or a newsletter.
+ * The innermost element that holds both the text and the close button is taken, so the header around a bar stays.
+ */
+const NOTICE_BARS = `[...document.querySelectorAll("body div, body section, body aside, body header")].filter((el) => {
+  const text = (el.innerText || "").trim();
+  if (!text || text.length > 250 || el.querySelector("h1, article")) return false;
+  if (!/country|region|language|sprache|cookie|survey|feedback|newsletter/i.test(text)) return false;
+  return [...el.querySelectorAll("button, [role=button]")].some((b) => /close|dismiss|schlie/i.test(b.getAttribute("aria-label") || "") || /^[×✕x]$/i.test((b.innerText || "").trim()));
+})`;
+
+/**
+ * Empty layers floating over most of the view with a tint or blur: the backdrop a dialog leaves when it is drawn as a
+ * separate element. Only looked for once a notice was hidden, so a page's own full-screen design stays.
+ */
+const BACKDROPS = `[...document.querySelectorAll("body *")].filter((el) => {
+  const s = getComputedStyle(el);
+  if (s.position !== "fixed" || s.display === "none" || (el.innerText || "").trim()) return false;
+  const b = el.getBoundingClientRect();
+  if (b.width * b.height < innerWidth * innerHeight * 0.8) return false;
+  const tinted = !/rgba\\(0, 0, 0, 0\\)|transparent/.test(s.backgroundColor);
+  return tinted || (s.backdropFilter && s.backdropFilter !== "none");
+})`;
+
+/**
+ * Hides the notices still floating over the page after the choice, their backdrops, and closable notice bars. Hiding
+ * agrees to nothing. The value is how many it hid. An expression, so it also runs while the page clock is paused.
+ */
+export const HIDE_NOTICES = `(() => {
+  const n = ${NOTICES};
+  for (const x of n) x.el.style.setProperty("display", "none", "important");
+  if (n.length) for (const el of ${BACKDROPS}) el.style.setProperty("display", "none", "important");
+  const bars = ${NOTICE_BARS}.filter((el, i, all) => !all.some((other, j) => j !== i && el.contains(other)));
+  for (const el of bars) el.style.setProperty("display", "none", "important");
+  return n.length + bars.length;
+})()`;
+export const hideNotices = (page: Page) => page.evaluate(HIDE_NOTICES) as Promise<number>;
 
 /**
  * Consent walls in a frame: a fixed container named for consent that holds an iframe and covers much of the view. The
@@ -137,7 +189,7 @@ export async function inspectPage(page: Page, requested: string, response: HTTPR
   const highlight = shot.highlight?.trim();
   const highlightFound = highlight ? readable(`${title}
 ${text}`).includes(readable(highlight)) : undefined;
-  const moved = movedTo(requested, finalUrl);
+  const moved = lostPage(requested, finalUrl);
   const blocked = await blockedReason(page, status);
   const dialog = await coveringDialog(page).catch(() => undefined);
   const paywall = await coveringPaywall(page).catch(() => undefined);
@@ -154,7 +206,7 @@ ${text}`).includes(readable(highlight)) : undefined;
 
 /** Opens a page only to check it, without filming. A page that doesn't load is a failed check, not an error. */
 export async function checkPage(url: string, shot: Pick<PageShot, "credit" | "expect" | "highlight">, opts: { userAgent?: string; headers?: Record<string, string>; device?: PageDevice } = {}): Promise<PageCheck> {
-  const browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--hide-scrollbars", "--mute-audio"] });
+  const browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio"] });
   try {
     const page = await browser.newPage();
     // The page is checked as the shot films it: sites show phones other banners and paywalls than desktops.

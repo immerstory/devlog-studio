@@ -34,7 +34,7 @@ export interface BrowserTargetConfig {
 }
 
 /** Privacy signals a normal privacy-minded browser sends: Do Not Track and Global Privacy Control. */
-export const DEFAULT_PAGE_HEADERS = ["DNT: 1", "Sec-GPC: 1"];
+export const DEFAULT_PAGE_HEADERS = ["DNT: 1", "Sec-GPC: 1", "Accept-Language: en-US,en;q=0.9"];
 
 /** Parses "Name: value" lines; lines without a name and a colon are skipped. */
 export function parseHeaders(lines: string[]): Record<string, string> {

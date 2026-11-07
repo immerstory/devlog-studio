@@ -128,6 +128,8 @@ function segmentMedia(seg: Segment, format: Format, materials: Map<string, Mater
     const size = m.width && m.height ? { width: m.width, height: m.height } : undefined;
     return { src: mediaUrl(m.key), kind: m.kind, seconds: m.durationSeconds ?? 0, trim: seg.visual.trimStart ?? 0, poster: mediaUrl(m.previewKey), size, framing: size ? seg.visual.framing ?? defaultFraming(m.kind) : undefined };
   }
+  // A slide draws itself; footage it kept from an earlier visual never shows.
+  if (seg.visual.type === "slide") return undefined;
   const key = seg.media?.[format];
   if (!key) return undefined;
   const video = isVideoKey(key);

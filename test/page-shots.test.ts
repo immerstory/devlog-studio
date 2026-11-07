@@ -35,7 +35,7 @@ test("the agent's page shots become page shots with pixel or selector scroll tar
 
 test("request header lines parse into names and values; malformed lines are skipped", async () => {
   const { parseHeaders, DEFAULT_PAGE_HEADERS } = await import("../shared/projects.js");
-  assert.deepEqual(parseHeaders(DEFAULT_PAGE_HEADERS), { DNT: "1", "Sec-GPC": "1" });
+  assert.deepEqual(parseHeaders(DEFAULT_PAGE_HEADERS), { DNT: "1", "Sec-GPC": "1", "Accept-Language": "en-US,en;q=0.9" });
   assert.deepEqual(parseHeaders(["X-Test:  a: b ", "no colon", ": empty name", "Bad Name: x"]), { "X-Test": "a: b" });
   assert.deepEqual(parseHeaders([]), {});
 });

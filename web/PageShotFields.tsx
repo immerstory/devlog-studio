@@ -41,6 +41,8 @@ export function PageShotFields({ shot, format, check, unlisted, onChange, childr
         Highlight
         <input placeholder="A sentence the page shows" value={shot.highlight ?? ""} onChange={(e) => set({ highlight: e.target.value || undefined })} />
       </label>
+      <label className="check" title="Without a scroll, zoom or highlight, a shot is a single still. This films it frame by frame, so the page's videos and animations play."><input type="checkbox" checked={!!shot.play} onChange={(e) => set({ play: e.target.checked || undefined })} />Film the page playing</label>
+      <label className="check" title="Films on the page's own clock instead of the exact frame clock, so streamed videos such as background videos play. Frames the browser can't deliver in time repeat the one before, so motion may stutter."><input type="checkbox" checked={!!shot.realtime} onChange={(e) => set({ realtime: e.target.checked || undefined })} />Real time</label>
       <label className="check"><input type="checkbox" checked={!shot.hideLink} onChange={(e) => set({ hideLink: e.target.checked ? undefined : true })} />Show the credit and link in the video</label>
       <CheckLine check={check} />
       {unlisted ? <p className="field-hint error">The news entries behind this post don't name this link. Check that it is the article the segment cites.</p> : null}
@@ -108,6 +110,10 @@ export function PageShotFields({ shot, format, check, unlisted, onChange, childr
       <label title="Added to the page after it loads, after the capture target's CSS">
         CSS for this shot
         <textarea className="code" rows={3} spellCheck={false} placeholder=".newsletter-popup { display: none !important; }" value={shot.css ?? ""} onChange={(e) => set({ css: e.target.value || undefined })} />
+      </label>
+      <label title="JavaScript run in the page after its CSS, before filming. It runs as the body of an async function, so it can await.">
+        Script for this shot
+        <textarea className="code" rows={3} spellCheck={false} placeholder={'document.querySelector("video")?.play();'} value={shot.script ?? ""} onChange={(e) => set({ script: e.target.value || undefined })} />
       </label>
       <div className="row">{children}</div>
     </div>

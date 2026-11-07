@@ -73,7 +73,7 @@ export interface PageSession {
  * frame, however long a screenshot takes. Lazy-loaded content still loads: page time waits for pending
  * network requests.
  */
-export async function openPage(opts: { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void }): Promise<PageSession> {
+export async function openPage(opts: { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void }): Promise<PageSession> {
   const orientation = opts.output.height > opts.output.width ? "portrait" : "landscape";
   const width = VIEWPORT_WIDTH[opts.device][orientation];
   // Rounded up, so the clip of the exact output size always fits inside the viewport.
@@ -81,7 +81,7 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
   const scale = opts.output.width / width;
   let browser: Browser | undefined;
   try {
-    browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--hide-scrollbars", "--mute-audio", "--autoplay-policy=no-user-gesture-required"] });
+    browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio", "--autoplay-policy=no-user-gesture-required"] });
     const page = await browser.newPage();
     const agent = opts.userAgent?.trim() || (opts.device === "phone" ? PHONE_AGENT : "");
     if (agent) await page.setUserAgent(agent);
@@ -125,6 +125,14 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
     }
     // Custom CSS goes in separate style elements, so a mistake in it cannot disable the rules above.
     for (const custom of opts.css ?? []) if (custom.trim()) await page.addStyleTag({ content: custom });
+    // The shot's own script runs as a function body; an error in it fails the shot with its message.
+    if (opts.script?.trim()) {
+      try {
+        await page.evaluate(`(async () => {\n${opts.script}\n})()`);
+      } catch (err) {
+        throw new Error(`The shot's script failed: ${(err as Error).message.split("\n")[0]}`);
+      }
+    }
     await new Promise((r) => setTimeout(r, Math.max(0, opts.settleMs)));
     // Some consent dialogs return after a reload or open late, so the last look before filming refuses and hides again.
     if (await refuseConsent(page)) opts.log("Refused optional cookies in a consent dialog that opened late.");
@@ -141,7 +149,8 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
     cdp.on("Network.loadingFinished", (e) => inFlight.delete(e.requestId));
     cdp.on("Network.loadingFailed", (e) => inFlight.delete(e.requestId));
     const freshRequests = () => [...inFlight.values()].some((started) => Date.now() - started < 2000);
-    await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
+    // A real-time session leaves the page on its own clock, so its streamed videos load and play.
+    if (!opts.realtime) await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
 
     // While page time is paused, promises never settle, so expressions run synchronously through the protocol.
     const run = async <T>(expression: string): Promise<T> => {
@@ -220,8 +229,10 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
       },
       async frame(f, ms, file) {
         await run(`window.scrollTo(0, ${Number(f.scrollY) || 0})`);
-        await advance(ms);
-        await run(`window.__devlogStep(${ms})`);
+        if (!opts.realtime) {
+          await advance(ms);
+          await run(`window.__devlogStep(${ms})`);
+        }
         const zoom = Math.max(1, f.zoom);
         const w = opts.output.width / scale / zoom;
         const h = opts.output.height / scale / zoom;
@@ -238,7 +249,7 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
         request.catch(() => {});
         const within = (ms: number) => Promise.race([request, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
         let shot = await within(1500);
-        if (!shot) {
+        if (!shot && !opts.realtime) {
           await cdp.send("Emulation.setVirtualTimePolicy", { policy: "advance" });
           shot = await within(lastFrame ? 5000 : 20_000);
           await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });

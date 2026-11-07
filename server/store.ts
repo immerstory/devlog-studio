@@ -175,11 +175,13 @@ export function saveScript(pid: string, id: string, format: Format, script: Scri
     // Capture results belong to the server: captures and going back a take change them, script edits do not.
     for (const segment of next.segments) {
       const saved = previous?.segments.find((p) => p.id === segment.id);
-      segment.media = saved?.media;
-      segment.mediaSeconds = saved?.mediaSeconds;
-      segment.capturedAt = saved?.capturedAt;
-      // A capture error belongs to the kind of visual it was made for; a segment that turned into another kind drops it.
-      segment.captureError = saved?.visual.type === segment.visual.type ? saved.captureError : undefined;
+      // Footage and a capture error belong to the kind of visual they were made for; a segment that turned into
+      // another kind drops them. Its takes stay, so going back a take still restores the earlier visual.
+      const sameKind = saved?.visual.type === segment.visual.type;
+      segment.media = sameKind ? saved.media : undefined;
+      segment.mediaSeconds = sameKind ? saved.mediaSeconds : undefined;
+      segment.capturedAt = sameKind ? saved.capturedAt : undefined;
+      segment.captureError = sameKind ? saved.captureError : undefined;
       segment.takes = saved?.takes;
     }
     const takes = post.narration[format];

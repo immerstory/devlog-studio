@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { checkPage, isSourceShot, movedTo, readable } from "../server/capture/browser/verify.js";
+import { checkPage, isSourceShot, lostPage, movedTo, readable } from "../server/capture/browser/verify.js";
 import { displayLink, fitMiddle } from "../video/renderer.js";
 
 test("a link has moved when it leads to another site or path", () => {
@@ -10,6 +10,9 @@ test("a link has moved when it leads to another site or path", () => {
   assert.equal(movedTo("http://example.com/a", "https://example.com/a"), undefined);
   assert.equal(movedTo("https://example.com/2026/story", "https://example.com/"), "https://example.com/");
   assert.equal(movedTo("https://example.com/a", "https://other.com/a"), "https://other.com/a");
+  assert.equal(lostPage("https://www.meta.com/quest/quest-3/", "https://www.meta.com/de/quest/quest-3/"), undefined, "a language path keeps the page");
+  assert.equal(lostPage("https://example.com/2026/story", "https://example.com/de/"), "https://example.com/de/", "a homepage means the article is gone");
+  assert.equal(lostPage("https://example.com/a", "https://other.com/a"), "https://other.com/a");
   assert.equal(isSourceShot({}), false);
   assert.equal(isSourceShot({ credit: "Outlet" }), true);
 });
