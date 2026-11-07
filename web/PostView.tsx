@@ -104,8 +104,9 @@ export function PostView({ id, materials, suggestions, onChange }: { id: string;
         <input className="ep-title" value={ep.title} onChange={(e) => setEp({ ...ep, title: e.target.value })} onBlur={() => save({ title: ep.title })} />
         <label className="inline-field">
           Publish
-          <input type="date" value={ep.publishDate ?? ""} onChange={(e) => save({ publishDate: e.target.value || undefined })} />
-          <input type="time" value={ep.publishTime ?? ""} title="Publish time; empty uses the default from Settings" onChange={(e) => save({ publishTime: e.target.value || undefined })} />
+          {/* Saved on leaving the field: while a year is typed, the field passes through dates such as 0002-11-08. */}
+          <input type="date" value={ep.publishDate ?? ""} onChange={(e) => setEp({ ...ep, publishDate: e.target.value || undefined })} onBlur={() => save({ publishDate: ep.publishDate })} />
+          <input type="time" value={ep.publishTime ?? ""} title="Publish time; empty uses the default from Settings" onChange={(e) => setEp({ ...ep, publishTime: e.target.value || undefined })} onBlur={() => save({ publishTime: ep.publishTime })} />
         </label>
         <label className="check"><input type="checkbox" checked={ep.outputs.includes("portrait")} onChange={(e) => save({ outputs: e.target.checked ? [...new Set([...ep.outputs, "portrait" as Format])] : ep.outputs.filter((f) => f !== "portrait") })} /> Short 9:16</label>
         <label className="check"><input type="checkbox" checked={ep.outputs.includes("landscape")} onChange={(e) => save({ outputs: e.target.checked ? [...new Set([...ep.outputs, "landscape" as Format])] : ep.outputs.filter((f) => f !== "landscape") })} /> Video 16:9</label>
