@@ -34,6 +34,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # Ubuntu 24.04 restricts the user namespaces Chrome's sandbox needs; page tests launch Chrome with its sandbox.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: npm ci
       - run: npm run check:public
       - run: npm run typecheck
