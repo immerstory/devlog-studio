@@ -12,6 +12,16 @@ export interface Source {
   archived?: boolean;
 }
 export type UnityTargetConfig = StudioConfig["unity"]["mcp"] & { projectPath: string };
+/** `scene` keeps the engine the open file uses. */
+export type BlenderRenderEngine = "scene" | "eevee" | "workbench" | "cycles";
+export interface BlenderTargetConfig {
+  /** Address of the MCP for Blender add-on's socket. Blender has to run on the same computer, because it writes the frames to disk. */
+  host: string;
+  port: number;
+  /** Full path of the file that has to be open; empty accepts any file. */
+  blendFile?: string;
+  engine?: BlenderRenderEngine;
+}
 export interface BrowserTargetConfig {
   /** Paths in page shots resolve against this URL; shots can also use absolute URLs. */
   baseUrl: string;
@@ -38,6 +48,7 @@ export function parseHeaders(lines: string[]): Record<string, string> {
 }
 export type CaptureTarget =
   | { id: string; label: string; kind: "unity-mcp"; config: UnityTargetConfig }
+  | { id: string; label: string; kind: "blender-mcp"; config: BlenderTargetConfig }
   | { id: string; label: string; kind: "browser"; config: BrowserTargetConfig };
 /** An optional second voice for videos. */
 export interface CoHostSettings {

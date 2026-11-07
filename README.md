@@ -61,6 +61,11 @@ Long work (progress checks, backfills, questions, scripts, captures, narration, 
 
    - **Editor shot:** a camera render from the open editor. A target object is framed automatically, and an occlusion check keeps walls out of the way. Optional camera moves are orbit (swing around the shot's centre), push (move toward it), pan (slide sideways, still looking ahead), turn (swivel on the spot) and rise (move up). Orbit, pan and turn are centred on your framing: an orbit of 40° starts 20° to one side and ends 20° to the other. Choose the target with **Pick object…** (search by name or browse the hierarchy of all loaded scenes) or **Use Unity selection** (the object selected in Unity). Paths add an index such as `[1]` when siblings share a name. To frame a shot yourself, set up the Scene view in Unity, then select **Use Scene view**. The first surface in the middle of the view becomes the shot's centre for push and orbit; the shot shows which object it lies on and how far away it is.
    - **Webpage shot:** a page filmed in headless Chrome, for a project with a browser capture target (**Project settings > Capture targets > Add browser target**, with an optional base URL so shots can use paths such as `/pricing`). The page scrolls from one position to another and can zoom in on a focus point; positions are pixels from the top or a CSS selector such as `#features`, which is brought to the top of the view. By default the move spans the whole shot with a smooth start and stop; **Start after** holds the page still for some seconds first, **Speed** sets the scroll speed in pixels per second (a scroll too long for the shot stops partway, and the task log says so), and **Movement** switches to a constant speed. Zoom follows the same timing. The page is shown on a phone or a desktop viewport (by default a phone for Shorts and a desktop for landscape videos). Its own animations, transitions and videos play at their real speed, because page time advances exactly one frame per filmed frame. **Hide** takes CSS selectors of elements to remove first, such as cookie banners. **CSS for this shot** adds your own CSS to the page after it loads, and the browser target's **CSS for every page** does the same for all its shots; the shot's CSS comes last, so it can override the target's. Pages that need a sign-in can't be filmed yet. Many search engines and some other sites answer automated browsers with a bot check; the shot then fails right away with the site's response (for example HTTP 429 and a CAPTCHA page). For those, record the page yourself and upload it as a material. The browser target's **User agent** setting replaces the browser's own one; empty uses Chrome's for desktop shots and an iPhone Safari one for phone shots. **Request headers** are sent with every request, one `Name: value` per line. By default they are the privacy signals `DNT: 1` (Do Not Track) and `Sec-GPC: 1` (Global Privacy Control), which the page's scripts also see; an empty list sends none. The browser is Chrome headless shell, which the app downloads on the first webpage shot.
+     - **Credit and link.** The video shows the shot's **Credit**, such as `Outlet · Author`, and the page's link in a slim band along the bottom edge. A slide can have a credit too, for a statement it quotes. Clear **Show the credit and link in the video** to leave both out. For a page that is a source, the script writer fills in the credit and **Expected text**, usually the article's headline.
+     - **Highlight.** A sentence or phrase exactly as the page writes it. The page then holds still on it and a marker sweeps across it word by word, instead of scrolling. Late content that pushes the sentence down doesn't lose it. The script writer sets it when the narration reports what the page says.
+     - **Ads.** The browser doesn't load known ad networks and hides leftover ad slots and the messages sites put in them.
+     - **Cookie dialogs.** Before checking and filming a page, the browser refuses optional cookies with the dialog's own refuse button, such as **Reject all** or **Decline optional cookies**, and hides any privacy notice still floating over the page. Hiding a notice agrees to nothing. It looks again just before filming, because some dialogs open late. A dialog that still covers the page fails the shot; hide it with a CSS selector under **Hide**. A consent wall in a frame and a paywall also fail the shot and are never hidden: show that source on a slide instead. Checks open each page in the shot's device size, because sites show phones other banners and paywalls.
+     - **Checks.** Each time a page is filmed, the capture checks it first. An error status such as HTTP 404 fails the shot. When the page doesn't show the expected text or the sentence to highlight within a few seconds, the shot fails too. Case, spacing, quotes and dashes don't matter. A shot with a credit or an expected text also fails when the link redirects to another page, because the article has moved. Other shots only log the redirect. **Check links**, next to **Capture shots**, opens every webpage shot's page without filming it, and each shot shows the result of its latest check. For a post made from news feed topics, a source shot whose link the feed entries don't name is marked: the script writer found or built that link, so check that it is the article the segment cites.
    - **Material:** an uploaded screenshot or video. If the footage does not exist yet, the segment describes what to record; upload it and choose it in the segment.
    - **Slide:** a title, bullets, image, before/after, stack or outro card in the theme's paper-and-ink style. Images can come from earlier segments or from materials. A stack shows any number of images as polaroids that drop from the top or slide in from alternating sides, piling up slightly rotated and offset; the slide lasts at least long enough for each polaroid to land.
 
@@ -73,9 +78,10 @@ Long work (progress checks, backfills, questions, scripts, captures, narration, 
 
 **Theme.** Under **Project settings > Theme**, **Edit theme…** opens the project's look beside a looping preview of a title, bullets, a polaroid stack and the ending, in either format. The preview uses the values as you edit them. The theme covers:
 
-- the slide colours: background, its highlight and edge, wash, text, accent and photo frame;
+- the slide colours: background, its highlight and edge, wash, text, accent and photo frame. The label over footage uses the background colour with the text colour on it, and swaps the two when the footage is dark behind it;
 - the slide font (headings, bullet points, photo captions and labels) and the logo on title slides, uploaded as files (TTF, OTF or WOFF fonts; PNG, JPEG, WebP or SVG images) and stored in Garage;
 - the slide backgrounds;
+- whether subtitles show on title slides; without them, a title slide's heading carries the point while the narration plays;
 - an optional intro and an optional outro.
 
 **Intro and outro.** Each is a bumper: a short title sequence chosen from the installed styles, with that style's settings. The intro plays over the first segment, and that segment's narration and subtitles start after it. The outro plays over the end of the last segment.
@@ -131,7 +137,7 @@ The same file runs on the server for the export and in the browser for the previ
 
 ### Add a theme preset
 
-A preset applies colours, fonts, a logo, an intro and an outro in one step. Its file paths are relative to the extension's folder, and it can't name files outside that folder. A preset replaces what it defines and keeps the rest of the theme.
+A preset applies colours, fonts, a logo, an intro and an outro in one step. Its file paths are relative to the extension's folder, and it can't name files outside that folder. A preset replaces what it defines and keeps the rest of the theme. A preset with `logo: null` removes the project's logo.
 
 ```ts
 themePresets: [
@@ -304,6 +310,23 @@ Capture calls the server's `script-execute` tool, so another MCP server works on
 - Occlusion tests build colliders in a temporary preview scene. Loaded scenes, assets and import settings are never changed.
 - Before capturing, the tool checks that the connected editor's `Application.dataPath` matches `unity.projectPath`.
 - Edit-mode renders show only objects saved in the scene. Runtime-spawned characters, crowds and traffic need recorded footage uploaded as materials.
+
+## Blender capture
+
+Editor shots can also come from the file open in Blender. They use the socket of the [MCP for Blender](https://github.com/ahujasid/mcp-for-blender) add-on, a separate project with its own license. The MCP server itself isn't needed.
+
+1. Install the add-on in Blender, and open your file.
+2. In the 3D view's sidebar, select **MCP for Blender > Connect to MCP server**.
+3. Under **Project settings > Capture targets**, select **Add Blender target**. To make shots fail when another file is open, enter it as the **Expected file**.
+
+A shot can frame an object by name, or use **Use 3D view** to take the view you framed. Camera moves work as they do in Unity. **Play the timeline** also plays the file's animation during the shot.
+
+**What capture does in your file:**
+
+- Each frame runs Python in Blender through the add-on. It adds a temporary camera, renders to PNG files outside your project, removes the camera and restores the scene's camera, frame and render settings.
+- The app never saves the file. Blender may still mark it as changed, and it shows unsaved edits in the render.
+- Blender can't respond while it renders, and it has to run on the same computer as the app.
+- Anyone who can reach the socket can run code in Blender. The add-on listens on `127.0.0.1`, so keep it there.
 
 ## Agent
 

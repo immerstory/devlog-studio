@@ -50,7 +50,7 @@ The author compiled the entry from industry news. It can hold rated items with s
 - The entry's draft posts and comment suggestions are the author's own words, and a suggestion can build on them.
 - Leave out internal notes: reminders, tagging ideas, people to contact, and notes about how the entry was made.
 - kind: "news". workDate: ${date}. recommendedFormat: "short". commits, files, notes and materials: empty lists. duplicateOf: an empty string.
-- suggestedShots: slides with the key number or quote, and the source's name on screen.
+- suggestedShots: the source article as a webpage shot at its exact URL, and slides with the key number or quote.
 - Do not repeat these existing topics unless the entry adds something new: ${existingTitles.length ? existingTitles.map((t) => `"${t}"`).join(", ") : "(none)"}.
 Return an empty list if nothing is worth a post.`;
 }
@@ -318,7 +318,7 @@ Each segment has ${coHosted ? "turns (spoken while its visual shows; may be empt
 ${getProject().settings.captureTargets.length ? '- type "capture": use targetId to select a configured target (empty uses the default) and the shotModel listed for that target ("scene" for an editor, "page" for a webpage), with the fields described below. Leave fields that do not apply to the shot model empty.' : ""}
 ${capturePromptRules(getProject().settings.captureTargets)}
 - type "material": an uploaded screenshot or video. materialId = an id from the materials list, or "" if the developer still needs to record it (describe exactly what to record in description).
-- type "slide": an explanation card on a themed background. layout = title | bullets | image | compare | stack | outro; heading = slide text; bullets for "bullets"; imageFrom = the images the slide shows ("image": one, "compare": two, before then after, "stack": 2–8 that pile up one after another as polaroids, good for a series of drafts, references or iterations), each either "seg:N" (the frame of an earlier capture or material segment, zero-based index N) or a material id.
+- type "slide": an explanation card on a themed background. layout = title | bullets | image | compare | stack | outro; heading = slide text; bullets for "bullets"; imageFrom = the images the slide shows ("image": one, "compare": two, before then after, "stack": 2–8 that pile up one after another as polaroids, good for a series of drafts, references or iterations), each either "seg:N" (the frame of an earlier capture or material segment, zero-based index N) or a material id. credit = who said or published what the slide quotes, such as "Outlet · Author", shown along the bottom edge; empty when the slide quotes no one. A title slide carries the point of its segment: when the narration reports a statement or a headline, the heading is that statement in short. On slides and labels, write a number with its unit or sign, such as 360°, 50% or $1,499, never as a bare number whose unit the narration only says.
 entrance (stack only) = drop (polaroids fall from the top) | slide (they slide in from alternating sides).
 Fill unused visual fields with "" , [] or "none"/"still"/"drop" as appropriate.
 

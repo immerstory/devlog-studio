@@ -35,6 +35,8 @@ export async function resolvePreset(preset: ThemePreset, folder: string, theme: 
   if (preset.colors) next.colors = preset.colors;
   if (preset.displayFont) next.displayFont = await upload("font", preset.displayFont);
   if (preset.logo) next.logo = await upload("image", preset.logo);
+  else if (preset.logo === null) delete next.logo;
+  if (preset.subtitlesOnTitleSlides !== undefined) next.subtitlesOnTitleSlides = preset.subtitlesOnTitleSlides;
   const music: Array<{ placement: BumperPlacement; file: string }> = [];
   for (const placement of ["intro", "outro"] as const) {
     const spec = preset[placement];

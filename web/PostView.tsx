@@ -22,7 +22,7 @@ import { ImageStrip, MediaPicker, type MediaItem } from "./MediaPicker";
 import { Spinner } from "@/components/ui/spinner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { DragDropVerticalIcon } from "@hugeicons/core-free-icons";
-import { autoFov, COMPARE_CAPTIONS, FOV_RANGE, STACK_MAX_IMAGES, ANGLE_FRAMING, DISTANCE_PADDING, MOTION_DEFAULTS, type YouTubeUpload, type ShotAngle, type ShotDistance, type Post, type Format, type MotionType, type Script, type Segment, type TimelineProps, type Visual, type CaptureVisual, type SceneShot, type PageShot, type Material, type Suggestion, newPageShot } from "../shared/types";
+import { autoFov, COMPARE_CAPTIONS, FOV_RANGE, STACK_MAX_IMAGES, ANGLE_FRAMING, DISTANCE_PADDING, MOTION_DEFAULTS, type PageCheck, type YouTubeUpload, type ShotAngle, type ShotDistance, type Post, type Format, type MotionType, type Script, type Segment, type TimelineProps, type Visual, type CaptureVisual, type SceneShot, type PageShot, type Material, type Suggestion, newPageShot } from "../shared/types";
 
 const FORMAT_LABEL: Record<Format, string> = { portrait: "Short 9:16", landscape: "Video 16:9" };
 const MOTION_UNIT: Record<MotionType, string> = { still: "", orbit: "°", push: "× distance", pan: "m", turn: "°", rise: "m" };
@@ -247,6 +247,11 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
   useEffect(() => {
     if (!dirty) { setScript(ep.scripts[format]); setBaseTargets(scriptCaptureTargets(ep.scripts[format])); }
   }, [ep, format]);
+  const [pageChecks, setPageChecks] = useState<{ checks: Record<string, PageCheck | null>; unlisted: string[] }>({ checks: {}, unlisted: [] });
+  useEffect(() => {
+    api<{ checks: Record<string, PageCheck | null>; unlisted: string[] }>(`/api/posts/${ep.id}/links/${format}`).then(setPageChecks, () => setPageChecks({ checks: {}, unlisted: [] }));
+  }, [ep, format, busy]);
+  const hasPages = !!script?.segments.some((s) => s.visual.type === "capture" && s.visual.shot.model === "page");
 
   const update = (fn: (s: Script) => void) => {
     if (!script) return;
@@ -312,6 +317,12 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
         {dirty ? <span className="small" style={{ color: "var(--highlight)" }}>Unsaved changes</span> : null}
         {script ? <span className="muted">{script.segments.length} segments · {words} words · ≈{Math.round(words / 2.5)} s</span> : null}
         <span className="grow" />
+        {hasPages ? (
+          <Button variant="outline" disabled={busy} title={dirty ? "Saves your edits, then opens each webpage shot's page without filming it" : "Opens each webpage shot's page without filming it"} onClick={() => { setPending({ action: "links" }); runSaved(`/api/posts/${ep.id}/links/${format}`); }}>
+            {pending?.action === "links" ? <Spinner /> : null}
+            {pending?.action === "links" ? "Checking links…" : "Check links"}
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           disabled={busy || !script}
@@ -355,6 +366,8 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
               onDragEnd={endDrag}
             >
             <SegmentEditor
+              pageCheck={pageChecks.checks[seg.id]}
+              linkUnlisted={pageChecks.unlisted.includes(seg.id)}
               onHandle={(down) => setArmed(down ? i : null)}
               ep={ep}
               seg={seg}
@@ -410,8 +423,12 @@ function SegmentEditor(props: {
   onDelete: () => void;
   run: RunFn;
   onPreviousTake: () => Promise<void>;
+  /** The latest check of a webpage shot's page. */
+  pageCheck?: PageCheck | null;
+  /** The feed entries behind the post don't name this source shot's link. */
+  linkUnlisted?: boolean;
 }) {
-  const { ep, seg, index, all, epMaterials, allMaterials, busy, pending, onStart, format, onChange, onMove, onHandle, onDelete, run, onPreviousTake } = props;
+  const { ep, seg, index, all, epMaterials, allMaterials, busy, pending, onStart, format, onChange, onMove, onHandle, onDelete, run, onPreviousTake, pageCheck, linkUnlisted } = props;
   const takes = seg.takes?.[format] ?? [];
   const takeButton = takes.length > 1 ? (
     <Button
@@ -431,13 +448,14 @@ function SegmentEditor(props: {
   const others = allMaterials.filter((m) => !epMaterials.some((e) => e.id === m.id));
   const { targets, defaultId } = useContext(CaptureTargetsContext);
   type EditableVisual = Exclude<Visual, CaptureVisual> | (Omit<CaptureVisual, "shot"> & SceneShot) | (Omit<CaptureVisual, "shot"> & PageShot);
-  /** Browser targets film page shots; Unity targets film scene shots. */
+  /** Browser targets film page shots; Unity and Blender targets film scene shots. */
   const shotFor = (targetId: string | undefined, current?: SceneShot | PageShot): SceneShot | PageShot => {
     const kind = targets.find((t) => t.id === (targetId ?? defaultId))?.kind;
     const model = kind === "browser" ? "page" : "scene";
     if (current?.model === model) return current;
     return model === "page" ? newPageShot() : { model: "scene", motion: { type: "still" } };
   };
+  const blender = (id: string | undefined) => targets.find((t) => t.id === (id ?? defaultId))?.kind === "blender-mcp";
   const v: EditableVisual = seg.visual.type === "capture" ? { type: "capture", description: seg.visual.description, targetId: seg.visual.targetId, ...seg.visual.shot } : seg.visual;
   const setVisual = (nv: EditableVisual) => {
     if (nv.type === "capture") {
@@ -556,7 +574,7 @@ function SegmentEditor(props: {
           </>
         ) : null}
         {v.type === "capture" && v.model === "page" ? (
-          <PageShotFields shot={v} format={format} onChange={(shot) => setVisual({ ...v, ...shot })}>
+          <PageShotFields shot={v} format={format} check={pageCheck} unlisted={linkUnlisted} onChange={(shot) => setVisual({ ...v, ...shot })}>
             <Button variant="outline" disabled={busy} onClick={() => { onStart("recapture"); run(`/api/posts/${ep.id}/capture/${format}`, { segmentId: seg.id }); }}>
               {pending === "recapture" ? <Spinner /> : null}
               {pending === "recapture" ? "Filming…" : media ? "Film again" : "Film page"}
@@ -566,8 +584,8 @@ function SegmentEditor(props: {
         ) : null}
         {v.type === "capture" && v.model === "scene" ? (
           <>
-            <input placeholder="Target object path (or use Scene view)" value={v.target ?? ""} onChange={(e) => setVisual({ ...v, target: e.target.value || undefined, pose: undefined, pivot: undefined })} />
-            <ObjectPicker targetId={v.targetId} onPick={(path) => setVisual({ ...v, target: path, pose: undefined, pivot: undefined })} />
+            <input placeholder={`Target object path (or use ${blender(v.targetId) ? "3D view" : "Scene view"})`} value={v.target ?? ""} onChange={(e) => setVisual({ ...v, target: e.target.value || undefined, pose: undefined, pivot: undefined })} />
+            <ObjectPicker targetId={v.targetId} editor={blender(v.targetId) ? "Blender" : "Unity"} onPick={(path) => setVisual({ ...v, target: path, pose: undefined, pivot: undefined })} />
             {v.target && !v.pose ? (
               <div className="row">
                 <select value={v.angle ?? "three-quarter"} onChange={(e) => setVisual({ ...v, angle: e.target.value as ShotAngle })}>
@@ -603,10 +621,16 @@ function SegmentEditor(props: {
               />
               <span className="muted small">° vertical</span>
             </div>
+            {blender(v.targetId) ? (
+              <label className="check" title="Plays the Blender file's timeline during the shot, and repeats it when the shot is longer.">
+                <input type="checkbox" checked={!!v.playTimeline} onChange={(e) => setVisual({ ...v, playTimeline: e.target.checked || undefined })} />
+                Play the timeline
+              </label>
+            ) : null}
             <div className="row">
-              <Button variant="outline" disabled={busy} title="Frame the shot in Unity's Scene view, then click" onClick={() => { onStart("scene"); run(`/api/posts/${ep.id}/segments/${seg.id}/scene-view`); }}>
+              <Button variant="outline" disabled={busy} title={blender(v.targetId) ? "Frame the shot in Blender's 3D view, then click" : "Frame the shot in Unity's Scene view, then click"} onClick={() => { onStart("scene"); run(`/api/posts/${ep.id}/segments/${seg.id}/scene-view`); }}>
                 {pending === "scene" ? <Spinner /> : null}
-                {pending === "scene" ? "Capturing…" : "Use Scene view"}
+                {pending === "scene" ? "Capturing…" : blender(v.targetId) ? "Use 3D view" : "Use Scene view"}
               </Button>
               <Button variant="outline" disabled={busy} onClick={() => { onStart("recapture"); run(`/api/posts/${ep.id}/capture/${format}`, { segmentId: seg.id }); }}>
                 {pending === "recapture" ? <Spinner /> : null}

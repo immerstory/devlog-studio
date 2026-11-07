@@ -7,7 +7,7 @@ import { SecretInput } from "@/components/secret-input";
 import { SegTabs } from "@/components/seg-tabs";
 import { useProjectRuntimeSettings } from "./Settings";
 import { api, type AppState, type Job } from "./api";
-import { DEFAULT_PAGE_HEADERS, type BrowserTargetConfig, type CaptureTarget, type GlobalSettings, type Project, type PublicConnection, type UnityTargetConfig } from "../shared/projects";
+import { DEFAULT_PAGE_HEADERS, type BlenderRenderEngine, type BlenderTargetConfig, type BrowserTargetConfig, type CaptureTarget, type GlobalSettings, type Project, type PublicConnection, type UnityTargetConfig } from "../shared/projects";
 import { PathField } from "./PathField";
 import { IntakeScheduleSection } from "./IntakeSchedule";
 import { ArchetypePicker, PromptGuidanceField } from "./ArchetypeFields";
@@ -39,6 +39,7 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
   const [sourceUses, setSourceUses] = useState<Record<string, number>>({});
   const edit = (fn: (p: Project) => void) => setDraft((p) => { const next = structuredClone(p); fn(next); return next; });
   const editUnity = (i: number, fn: (c: UnityTargetConfig) => void) => edit((p) => { const t = p.settings.captureTargets[i]; if (t.kind === "unity-mcp") fn(t.config); });
+  const editBlender = (i: number, fn: (c: BlenderTargetConfig) => void) => edit((p) => { const t = p.settings.captureTargets[i]; if (t.kind === "blender-mcp") fn(t.config); });
   const editBrowser = (i: number, fn: (c: BrowserTargetConfig) => void) => edit((p) => { const t = p.settings.captureTargets[i]; if (t.kind === "browser") fn(t.config); });
   const act = async (fn: () => Promise<void>) => { setMsg(""); try { await fn(); } catch (e) { setMsg((e as Error).message); } };
   useEffect(() => { setDraft(project); }, [project]);
@@ -145,10 +146,11 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
       <div className="settings-tab" hidden={tab !== "capture"}>
       <SettingsSection
         title="Capture targets"
-        description="Where shots are filmed: a Unity editor through Unity-MCP, or a browser for webpages. Shots without their own target use the default."
+        description="Where shots are filmed: a Unity editor through Unity-MCP, the file open in Blender through MCP for Blender, or a browser for webpages. Shots without their own target use the default."
         action={
           <div className="row">
             <Button variant="outline" size="sm" onClick={() => edit((p) => { const target: CaptureTarget = { id: id("target"), label: "Unity editor", kind: "unity-mcp", config: { url: "http://localhost:8080/mcp", headerHelper: "", headerHelperArgs: [], projectPath: "" } }; p.settings.captureTargets.push(target); p.settings.defaultCaptureTargetId ??= target.id; })}>Add Unity target</Button>
+            <Button variant="outline" size="sm" onClick={() => edit((p) => { const target: CaptureTarget = { id: id("target"), label: "Blender", kind: "blender-mcp", config: { host: "127.0.0.1", port: 9876, engine: "scene" } }; p.settings.captureTargets.push(target); p.settings.defaultCaptureTargetId ??= target.id; })}>Add Blender target</Button>
             <Button variant="outline" size="sm" onClick={() => edit((p) => { const target: CaptureTarget = { id: id("target"), label: "Website", kind: "browser", config: { baseUrl: "" } }; p.settings.captureTargets.push(target); p.settings.defaultCaptureTargetId ??= target.id; })}>Add browser target</Button>
           </div>
         }
@@ -168,6 +170,26 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
                 <PathField kind="unity" label="Expected Unity project" hint={UNITY_PROJECT_HINT} value={target.config.projectPath} start={s.sources.find((x) => x.id === s.primarySourceId)?.path} onChange={(v) => editUnity(i, (c) => { c.projectPath = v; })} />
                 <PathField kind="executable" label="Header helper" hint={HEADER_HELPER_HINT} value={target.config.headerHelper} onChange={(v) => editUnity(i, (c) => { c.headerHelper = v; })} />
                 <label>Header helper arguments<ListInput value={target.config.headerHelperArgs} onChange={(v) => editUnity(i, (c) => { c.headerHelperArgs = v; })} /><span className="field-hint">{HEADER_ARGS_HINT}</span></label>
+              </>
+            ) : target.kind === "blender-mcp" ? (
+              <>
+                <p className="muted small">
+                  Films the file open in Blender through the <a href="https://github.com/ahujasid/mcp-for-blender" target="_blank" rel="noreferrer">MCP for Blender</a> add-on. Each frame uses a temporary camera and the scene's settings return afterwards. Devlog Studio never saves the file. Blender can't respond while it renders.
+                </p>
+                <div className="row align-top">
+                  <Text label="Name" hint={TARGET_NAME_HINT} value={target.label} onChange={(v) => edit((p) => { p.settings.captureTargets[i].label = v; })} />
+                  <Text label="Add-on port" hint="The port shown in the add-on's panel in Blender." type="number" value={target.config.port} onChange={(v) => editBlender(i, (c) => { c.port = Number(v); })} />
+                </div>
+                <Text label="Expected file" hint="Full path of the .blend file. Shots fail when another file is open. Leave this empty to accept any file." value={target.config.blendFile} onChange={(v) => editBlender(i, (c) => { c.blendFile = v.trim() || undefined; })} />
+                <label>
+                  Render engine
+                  <select value={target.config.engine ?? "scene"} onChange={(e) => editBlender(i, (c) => { c.engine = e.target.value as BlenderRenderEngine; })}>
+                    <option value="scene">The file's own engine</option>
+                    <option value="eevee">EEVEE</option>
+                    <option value="workbench">Workbench (fastest, no materials or lights)</option>
+                    <option value="cycles">Cycles (slowest)</option>
+                  </select>
+                </label>
               </>
             ) : (
               <>

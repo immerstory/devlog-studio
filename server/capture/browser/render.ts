@@ -3,7 +3,10 @@ import path from "node:path";
 import puppeteer, { type Browser, type CDPSession, type Page } from "puppeteer-core";
 import { Browser as BrowserKind, computeExecutablePath, install } from "@puppeteer/browsers";
 import { CACHE_DIR } from "../../config.js";
-import type { PageDevice } from "../../../shared/types.js";
+import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
+import { coveringDialog, coveringPaywall, hideNotices, inspectPage, refuseConsent } from "./verify.js";
+import { highlightScript } from "./highlight.js";
+import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
 
 /** The Chrome build this version of Puppeteer is made for. */
 const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
@@ -20,7 +23,7 @@ const VIEWPORT_WIDTH: Record<PageDevice, { portrait: number; landscape: number }
   phone: { portrait: 390, landscape: 844 },
   desktop: { portrait: 1280, landscape: 1440 },
 };
-const PHONE_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+export const PHONE_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 
 /** Wording of common bot checks and access walls, matched against the page title and the start of its text. */
 const CHALLENGE = /captcha|verify(ing)? (you are|you're) (human|not a (bot|robot))|are you a robot|just a moment|attention required|checking your browser|access denied|unusual traffic|bot (check|protection)/i;
@@ -70,7 +73,7 @@ export interface PageSession {
  * frame, however long a screenshot takes. Lazy-loaded content still loads: page time waits for pending
  * network requests.
  */
-export async function openPage(opts: { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; userAgent?: string; headers?: Record<string, string>; log: (l: string) => void }): Promise<PageSession> {
+export async function openPage(opts: { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void }): Promise<PageSession> {
   const orientation = opts.output.height > opts.output.width ? "portrait" : "landscape";
   const width = VIEWPORT_WIDTH[opts.device][orientation];
   // Rounded up, so the clip of the exact output size always fits inside the viewport.
@@ -96,20 +99,40 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
       );
     }
     await page.setViewport({ width, height, deviceScaleFactor: scale, isMobile: opts.device === "phone", hasTouch: opts.device === "phone" });
+    await blockAds(page);
     opts.log(`Opening ${opts.url} (${opts.device}, ${width}×${height})…`);
     const response = await page.goto(opts.url, { waitUntil: "load", timeout: 60_000 });
     // Busy pages (endless image loading, chat widgets, analytics) never go quiet, so quiet is waited for briefly only.
     await page.waitForNetworkIdle({ idleTime: 500, timeout: 10_000 }).catch(() => {});
-    const blocked = await blockedReason(page, response?.status());
-    if (blocked) throw new Error(`The site blocked the automated browser (${blocked}). Record the page yourself and upload it as a material, or film a page that allows automated browsers.`);
+    if (await refuseConsent(page)) opts.log("Refused optional cookies in the consent dialog.");
+    const notices = await hideNotices(page).catch(() => 0);
+    const pleas = await hideAdPleas(page).catch(() => 0);
+    if (pleas) opts.log(`Hid ${pleas} message(s) in empty ad slots.`);
+    if (notices) opts.log(`Hid ${notices} privacy notice(s) over the page.`);
+    // Hidden elements come before the check, so a banner the shot hides doesn't count as covering the page.
     const css = [
       "html { scroll-behavior: auto !important; }",
+      AD_CSS,
       ...opts.hide.filter((s) => s.trim()).map((s) => `${s} { display: none !important; }`),
     ].join("\n");
     await page.addStyleTag({ content: css });
+    const check = await inspectPage(page, opts.url, response, opts.source ?? {});
+    await opts.onCheck?.(check);
+    if (check.finalUrl) opts.log(`The page is now at ${check.finalUrl}.`);
+    if (!check.ok) {
+      if (check.problem?.startsWith("The site blocked")) throw new Error(`${check.problem} Record the page yourself and upload it as a material, or film a page that allows automated browsers.`);
+      throw new Error(`${check.problem} Check the link${check.expect ? " and the expected text" : ""} of this shot.`);
+    }
     // Custom CSS goes in separate style elements, so a mistake in it cannot disable the rules above.
     for (const custom of opts.css ?? []) if (custom.trim()) await page.addStyleTag({ content: custom });
     await new Promise((r) => setTimeout(r, Math.max(0, opts.settleMs)));
+    // Some consent dialogs return after a reload or open late, so the last look before filming refuses and hides again.
+    if (await refuseConsent(page)) opts.log("Refused optional cookies in a consent dialog that opened late.");
+    await hideNotices(page).catch(() => 0);
+    const late = await coveringDialog(page).catch(() => undefined);
+    if (late) throw new Error(`A cookie dialog covers the page (“${late}…”). Hide it with a CSS selector under Hide.`);
+    const paywall = await coveringPaywall(page).catch(() => undefined);
+    if (paywall) throw new Error(`A paywall covers the page (“${paywall}…”). Show this source on a slide instead.`);
     const cdp = await page.createCDPSession();
     // Requests in flight, by start time; long-lived ones (streams, long polling, live reload) are ignored.
     const inFlight = new Map<string, number>();
@@ -134,6 +157,8 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
         const before = c.t;
         c.t += ms;
         for (const a of document.getAnimations()) {
+          // Scroll-driven animations follow the scroll position, which the frames set, not page time.
+          if (a.timeline && !(a.timeline instanceof DocumentTimeline)) continue;
           if (!c.base.has(a)) { c.base.set(a, (Number(a.currentTime) || 0) - before); a.pause(); }
           a.currentTime = c.base.get(a) + c.t;
         }
@@ -143,6 +168,10 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
         }
       };
       true`);
+    // The marker's animation starts on the paused clock, so the first frame shows it at its very start.
+    if (opts.highlight?.trim() && !(await run<boolean>(highlightScript(opts.highlight)))) {
+      throw new Error(`The page doesn't show the sentence to highlight (“${opts.highlight.trim().slice(0, 80)}”). Copy it from the page exactly.`);
+    }
     /** Resolves true when the page has run `ms` of page time, false after `timeoutMs` of real time. */
     const budgetExpired = (timeoutMs: number) =>
       new Promise<boolean>((resolve) => {

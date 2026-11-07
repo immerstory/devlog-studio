@@ -169,6 +169,8 @@ export interface SlideVisual {
   entrance?: "drop" | "slide";
   /** Caption under a picture, by image id, so it moves with the image when the order changes. */
   captions?: Record<string, string>;
+  /** Who said or published what the slide shows, such as "Outlet · Author"; shown along the bottom edge. */
+  credit?: string;
   /** Stack only: pictures without their own caption show their image title. */
   titleCaptions?: boolean;
 }
@@ -193,6 +195,8 @@ export interface SceneShot {
   angle?: ShotAngle;
   distance?: ShotDistance;
   motion: ShotMotion;
+  /** Blender only: plays the file's timeline during the shot, repeating it when the shot is longer. */
+  playTimeline?: boolean;
 }
 
 export const FOV_RANGE = { min: 5, max: 100 };
@@ -264,6 +268,30 @@ export interface PageShot {
   scrollSpeed?: number;
   /** Smooth starts and stops the move gently; linear moves at a constant speed. */
   easing?: "smooth" | "linear";
+  /** Who published the page, such as "Outlet · Author", shown with the link. A credit makes this a source shot. */
+  credit?: string;
+  /** Text the page must show, such as an article's headline. Capture fails without it, so a moved article isn't filmed. */
+  expect?: string;
+  /** Leaves out the credit and link the video shows at the bottom of the shot. */
+  hideLink?: boolean;
+  /** A sentence the page shows. The page holds still on it and marks it word by word, instead of scrolling. */
+  highlight?: string;
+}
+
+/** What a page showed when it was opened. A failed check names its problem. */
+export interface PageCheck {
+  url: string;
+  checkedAt: string;
+  ok: boolean;
+  status?: number;
+  /** The address after redirects, when it differs. */
+  finalUrl?: string;
+  title?: string;
+  expect?: string;
+  found?: boolean;
+  /** The sentence the shot highlights, checked like the expected text. */
+  highlight?: string;
+  problem?: string;
 }
 
 /**
@@ -281,7 +309,8 @@ export function pageMoveProgress(shot: Pick<PageShot, "delaySeconds" | "scrollSp
 export const newPageShot = (url = ""): PageShot => ({ model: "page", url, scrollFrom: 0, scrollTo: 0, zoomFrom: 1, zoomTo: 1, focus: { x: 0.5, y: 0.5 } });
 
 /** A page shot without scrolling or zooming is a single still frame. */
-export const pageShotMoves = (s: PageShot) => String(s.scrollFrom) !== String(s.scrollTo) || s.zoomFrom !== s.zoomTo;
+/** A shot films more than one frame when it scrolls, zooms or highlights a sentence. */
+export const pageShotMoves = (s: PageShot) => String(s.scrollFrom) !== String(s.scrollTo) || s.zoomFrom !== s.zoomTo || !!s.highlight?.trim();
 export interface CaptureVisual {
   type: "capture";
   targetId?: string;
@@ -519,6 +548,8 @@ export interface TimelineSegment {
   audio?: AudioClip[];
   /** Frames the narration and the on-screen label wait, because the intro plays over the segment first. */
   introFrames?: number;
+  /** The source a segment shows: a webpage shot's page with its credit, or a slide's credit alone. */
+  source?: { url?: string; credit?: string };
 }
 
 /** Slide palette. Hex colours as #rrggbb, because the slides append alpha digits to them. */
@@ -575,6 +606,8 @@ export interface Theme {
   logoUrl?: string;
   fontUrl?: string;
   backgrounds: string[];
+  /** False leaves the subtitles out while a title slide shows, whose heading carries the point. */
+  subtitlesOnTitleSlides?: boolean;
   /** Title outro over the last segment; its frames are part of the last segment's duration. */
   /** Bumpers over the first and last segment; their frames are part of those segments' durations. */
   intro?: TimelineBumper;

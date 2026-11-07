@@ -9,6 +9,18 @@ const DISPLAY_FAMILY = "DevlogDisplay";
 const DISPLAY = `${DISPLAY_FAMILY}, 'Segoe Print', 'Comic Sans MS', cursive`;
 const BODY = "'Segoe UI', Inter, system-ui, sans-serif";
 
+/** A link as people read it: without the protocol, "www." or a trailing slash. */
+export const displayLink = (url: string) => url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "");
+
+/** The text, shortened in the middle with an ellipsis until it fits. */
+export function fitMiddle(width: (s: string) => number, text: string, max: number): string {
+  if (width(text) <= max) return text;
+  let keep = text.length - 1;
+  const cut = (n: number) => `${text.slice(0, Math.ceil(n * 0.6))}…${text.slice(text.length - Math.floor(n * 0.4))}`;
+  while (keep > 4 && width(cut(keep)) > max) keep--;
+  return cut(keep);
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 /** Linear map from one range to another; `limit` stops at the ends of the range. */
 const map = (v: number, from: [number, number], to: [number, number], limit = false) => {
@@ -90,6 +102,8 @@ export class VideoFrameRenderer {
   /** Output pixels per video pixel. */
   private readonly scale: number;
   private readonly pictures = new Map<string, Picture>();
+  /** Segments whose footage is dark where the label sits, so the label swaps its colours to stand out. */
+  private readonly darkBehindLabel = new Set<string>();
   private readonly blurred = new Map<string, HTMLCanvasElement>();
   private readonly backgrounds: string[];
   private readonly layers: HTMLCanvasElement[] = [];
@@ -133,6 +147,7 @@ export class VideoFrameRenderer {
         if (!tolerant) throw err;
       }
     }));
+    for (const s of t.segments) if (s.onScreen && s.media && r.isDarkBehindLabel(s)) r.darkBehindLabel.add(s.id);
     for (const [placement, bumper] of [["intro", t.theme.intro], ["outro", t.theme.outro]] as const) {
       const animation = bumper && BUMPER_ANIMATIONS[bumper.style];
       if (!animation) continue;
@@ -213,7 +228,8 @@ export class VideoFrameRenderer {
 
   /** The text shadows of a caption, drawn once per text. The sprite is centred on the block horizontally. */
   private captionShadow(font: string, block: TextBlock, strokeWidth: number) {
-    const pad = 32;
+    // Room for the wide halo's blur, which fades out within about three times its radius.
+    const pad = 72;
     const key = `${font}|${block.lines.join("\n")}`;
     let sprite = this.shadowSprites.get(key);
     if (!sprite) {
@@ -225,8 +241,9 @@ export class VideoFrameRenderer {
       c.lineJoin = "miter";
       c.miterLimit = 4;
       c.lineWidth = strokeWidth;
-      // Listed last in the CSS means painted first: the wide soft shadow lies under the two tight ones.
-      for (const [color, blur, dy] of [["rgba(0,0,0,0.8)", 14, 4], ["#000", 3, 0], ["#000", 3, 0]] as const) {
+      // Painted in order: a wide dark halo first, which mutes light text of a page behind the subtitle, then the soft
+      // drop shadow and the two tight outlines.
+      for (const [color, blur, dy] of [["rgba(0,0,0,0.7)", 44, 0], ["rgba(0,0,0,0.8)", 14, 4], ["#000", 3, 0], ["#000", 3, 0]] as const) {
         c.filter = `blur(${(blur / 2) * this.scale}px)`;
         c.fillStyle = color;
         c.strokeStyle = color;
@@ -246,6 +263,7 @@ export class VideoFrameRenderer {
     const seg = w.segment;
     if (seg.visual.type === "slide") {
       this.drawSlide(ctx, seg, frame, this.backgrounds.length ? this.backgrounds[w.index % this.backgrounds.length] : undefined);
+      if (seg.source) this.drawSource(ctx, seg.source, frame - (seg.introFrames ?? 0));
       return;
     }
     if (seg.media) {
@@ -259,7 +277,51 @@ export class VideoFrameRenderer {
       ctx.fillRect(0, 0, this.t.width, this.t.height);
     } else this.drawMissing(ctx, seg);
     const intro = seg.introFrames ?? 0;
-    if (seg.onScreen && frame >= intro && (labelFrames === undefined || frame < labelFrames)) this.drawLabel(ctx, seg.onScreen, frame - intro);
+    if (seg.onScreen && frame >= intro && (labelFrames === undefined || frame < labelFrames)) this.drawLabel(ctx, seg.onScreen, frame - intro, this.darkBehindLabel.has(seg.id));
+    if (seg.source && frame >= intro) this.drawSource(ctx, seg.source, frame - intro);
+  }
+
+  /**
+   * The credit and link of a source, as one slim band along the bottom edge for the whole segment, so it doesn't
+   * compete with the label and the subtitles. A slide with a credit and no link shows the credit alone.
+   */
+  private drawSource(ctx: Ctx, source: NonNullable<TimelineSegment["source"]>, frame: number) {
+    const { portrait } = this;
+    const { width: W, height: H } = this.t;
+    const { paper, ink, accent } = this.colors;
+    const size = portrait ? 28 : 22;
+    const padX = portrait ? 32 : 28;
+    const bandHeight = Math.round(size * 2);
+    const creditFont = `600 ${size}px ${BODY}`;
+    const linkFont = `${size}px ${BODY}`;
+    const room = W - padX * 2;
+    const separator = "  ·  ";
+    ctx.font = creditFont;
+    const credit = source.credit ? fitMiddle((s) => ctx.measureText(s).width, source.credit, room * 0.45) : "";
+    const creditWidth = credit ? ctx.measureText(credit + (source.url ? separator : "")).width : 0;
+    ctx.font = linkFont;
+    const link = source.url ? fitMiddle((s) => ctx.measureText(s).width, displayLink(source.url), room - creditWidth) : "";
+    const appear = map(frame, [0, 10], [0, 1], true);
+    const top = H - bandHeight;
+    ctx.save();
+    ctx.globalAlpha = appear;
+    ctx.fillStyle = `${paper}d9`;
+    ctx.fillRect(0, top, W, bandHeight);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    const y = top + bandHeight / 2;
+    if (credit) {
+      ctx.font = creditFont;
+      ctx.fillStyle = ink;
+      ctx.fillText(credit + (link ? separator : ""), padX, y);
+    }
+    if (link) {
+      ctx.font = linkFont;
+      ctx.fillStyle = accent;
+      ctx.fillText(link, padX + creditWidth, y);
+    }
+    ctx.textBaseline = "alphabetic";
+    ctx.restore();
   }
 
   private drawFootage(ctx: Ctx, seg: TimelineSegment, frame: number) {
@@ -322,13 +384,39 @@ export class VideoFrameRenderer {
     ctx.textAlign = "left";
   }
 
-  private drawLabel(ctx: Ctx, text: string, frame: number) {
+  /**
+   * Whether the footage is dark in the band where the label sits. It reads the segment's still once, so the preview
+   * and the export decide alike and a moving clip doesn't make the label flicker.
+   */
+  private isDarkBehindLabel(seg: TimelineSegment): boolean {
+    const m = seg.media!;
+    const picture = this.pictures.get(m.kind === "image" ? m.src : m.poster ?? "");
+    if (!picture) return false;
+    const w = this.portrait ? 54 : 96, h = this.portrait ? 96 : 54;
+    const canvas = this.platform.createCanvas(w, h);
+    const c = canvas.getContext("2d")!;
+    drawCover(c, picture, 0, 0, w, h);
+    const top = Math.floor(h * (this.portrait ? 0.1 : 0.04)), bottom = Math.ceil(h * (this.portrait ? 0.24 : 0.2));
+    // Portrait labels sit centred across the width, landscape labels at the top left.
+    const right = this.portrait ? w : Math.ceil(w * 0.6);
+    const data = c.getImageData(0, top, right, bottom - top).data;
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    return sum / (data.length / 4) / 255 < 0.45;
+  }
+
+  private drawLabel(ctx: Ctx, text: string, frame: number, inverted = false) {
     const { portrait } = this;
-    const { paper, ink } = this.colors;
-    const font = `${portrait ? 64 : 54}px ${DISPLAY}`;
-    const block = this.block(ctx, font, text, Infinity);
-    const width = block.width + 56;
-    const height = block.height + 16;
+    const { paper: themePaper, ink: themeInk } = this.colors;
+    // On dark footage the label swaps paper and ink, so it never sinks into the page behind it.
+    const paper = inverted ? themeInk : themePaper;
+    const ink = inverted ? themePaper : themeInk;
+    // Large and well padded, so the label holds its own against a busy page behind it.
+    const font = `${portrait ? 78 : 62}px ${DISPLAY}`;
+    const block = this.block(ctx, font, text, portrait ? this.t.width - 200 : 1200);
+    const padX = portrait ? 44 : 36, padY = portrait ? 22 : 18;
+    const width = block.width + padX * 2;
+    const height = block.height + padY * 2;
     const y = map(frame, [0, 10], [-30, 0], false);
     const dy = frame >= 10 ? 0 : y;
     const left = portrait ? this.t.width / 2 - width / 2 : 70;
@@ -337,10 +425,10 @@ export class VideoFrameRenderer {
     ctx.save();
     ctx.translate(left + width / 2, top + height / 2);
     ctx.rotate(rotation);
-    this.drawBoxShadow(ctx, -width / 2, -height / 2, width, height, "rgba(0,0,0,0.35)", 18, 6);
+    this.drawBoxShadow(ctx, -width / 2, -height / 2, width, height, "rgba(0,0,0,0.5)", 28, 10);
     ctx.fillStyle = paper;
     ctx.fillRect(-width / 2, -height / 2, width, height);
-    this.drawBlock(ctx, font, block, -width / 2 + 28, -height / 2 + 10, "left", ink);
+    this.drawBlock(ctx, font, block, -width / 2 + padX, -height / 2 + padY, "left", ink);
     ctx.restore();
   }
 
@@ -348,6 +436,10 @@ export class VideoFrameRenderer {
     const ms = (frame / this.t.fps) * 1000;
     const cur: Caption | undefined = this.t.captions.find((c) => ms >= c.startMs && ms < c.endMs);
     if (!cur) return;
+    if (this.t.theme.subtitlesOnTitleSlides === false) {
+      const shown = this.windows.find((w) => frame >= w.start && frame < w.end)?.segment.visual;
+      if (shown?.type === "slide" && shown.layout === "title") return;
+    }
     const { portrait } = this;
     const { width: W, height: H } = this.t;
     const pop = map(ms - cur.startMs, [0, 90], [0.92, 1], true);
@@ -553,7 +645,7 @@ export class VideoFrameRenderer {
       items.push({ height, draw: (c, y) => risen(0, (l) => l.drawImage(logo.source, (W - width) / 2, y, width, height))(c) });
     }
     if (v?.heading) {
-      const size = layout === "title" ? headingSize * 1.1 : pictures ? headingSize * 0.8 : headingSize;
+      const size = layout === "title" ? headingSize * (logo ? 1.1 : 1.3) : pictures ? headingSize * 0.8 : headingSize;
       const font = `${size}px ${DISPLAY}`;
       const block = this.block(ctx, font, v.heading, contentWidth, 1.1);
       const left = layout === "bullets";

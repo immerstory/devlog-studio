@@ -80,6 +80,8 @@ export interface StudioConfig {
     intro?: import("../shared/bumpers.js").BumperChoice;
     /** Bumper over the end of the last segment; none when unset. */
     outro?: import("../shared/bumpers.js").BumperChoice;
+    /** False leaves the subtitles out while a title slide shows. */
+    subtitlesOnTitleSlides?: boolean;
   };
 }
 

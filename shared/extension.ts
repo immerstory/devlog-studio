@@ -34,8 +34,10 @@ export interface ThemePreset {
   colors?: Partial<ThemeColors>;
   /** A font file, relative to the extension's folder. */
   displayFont?: string;
-  /** An image file, relative to the extension's folder. */
-  logo?: string;
+  /** False leaves the subtitles out while a title slide shows. */
+  subtitlesOnTitleSlides?: boolean;
+  /** An image file, relative to the extension's folder. null removes the project's logo. */
+  logo?: string | null;
   intro?: PresetBumper;
   outro?: PresetBumper;
 }

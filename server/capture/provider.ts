@@ -4,13 +4,14 @@ import { inContext } from "../context.js";
 import { getProject } from "../projects.js";
 import { unityProvider } from "./unity/index.js";
 import { browserProvider } from "./browser/index.js";
+import { blenderProvider } from "./blender/index.js";
 import type { SceneObject } from "./unity/client.js";
 
 export type Log = (line: string) => void;
 export interface CaptureOutput { dir: string; format: Format; frames: number; fps: number }
 export interface CaptureResult { file: string; poster?: string; durationSeconds?: number; warning?: string }
 export interface CaptureProvider<TConfig, TShot> {
-  kind: "unity-mcp" | "unreal" | "browser";
+  kind: "unity-mcp" | "blender-mcp" | "unreal" | "browser";
   shotModel: "scene" | "page";
   capabilities: { objects: boolean; selection: boolean; viewPose: boolean; motions: MotionType[]; video: boolean };
   resourceKey(target: TConfig): string;
@@ -25,7 +26,7 @@ export interface CaptureProvider<TConfig, TShot> {
 }
 // Each provider checks that a target's kind and a shot's model match before it gets them.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const providers = new Map<string, CaptureProvider<any, any>>([["unity-mcp", unityProvider], ["browser", browserProvider]]);
+const providers = new Map<string, CaptureProvider<any, any>>([["unity-mcp", unityProvider], ["blender-mcp", blenderProvider], ["browser", browserProvider]]);
 /** A Unity target without its own project path expects the primary source. */
 function withProjectPath(target: CaptureTarget, settings: ProjectSettings): CaptureTarget {
   if (target.kind !== "unity-mcp" || target.config.projectPath) return target;

@@ -274,6 +274,9 @@ export function scriptSchema(targets: CaptureTarget[], coHosted = false) {
   properties.url = { type: "string" };
   properties.device = { type: "string", enum: ["phone", "desktop", ""] };
   properties.scrollTo = { type: "string" };
+  properties.credit = { type: "string" };
+  properties.expectText = { type: "string" };
+  properties.highlightText = { type: "string" };
   visual.required = Object.keys(properties);
   return schema;
 }

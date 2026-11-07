@@ -98,6 +98,17 @@ export async function syncFeeds(range: DateRange, log: (line: string) => void = 
   return { records, errors };
 }
 
+/** The texts of the feed entries behind some topics. */
+export async function feedTexts(pid: string, suggestions: Array<Pick<Suggestion, "sources">>): Promise<string[]> {
+  const ids = new Set(suggestions.flatMap((s) => s.sources.feeds ?? []));
+  if (!ids.size) return [];
+  return (await listRecords(pid)).filter((r) => ids.has(r.id)).map((r) => (r.detail as FeedDetail).text);
+}
+
+const bareLink = (url: string) => url.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/[/#?]+$/, "").toLowerCase();
+/** True when a text names the link, with or without its protocol and "www.". */
+export const textNamesLink = (text: string, url: string) => !!bareLink(url) && text.toLowerCase().replace(/https?:\/\//g, "").replace(/\bwww\./g, "").includes(bareLink(url));
+
 /** The text of the feed entries behind a post's topics, with the rules for using it. Empty when no topic comes from a feed. */
 export async function feedContext(pid: string, suggestions: Array<Pick<Suggestion, "sources">>): Promise<string> {
   const ids = new Set(suggestions.flatMap((s) => s.sources.feeds ?? []));

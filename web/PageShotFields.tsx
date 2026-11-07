@@ -1,22 +1,49 @@
 import React from "react";
 import { ListInput } from "@/components/list-input";
-import { defaultPageDevice, type Format, type PageDevice, type PageShot } from "../shared/types";
+import { defaultPageDevice, type Format, type PageCheck, type PageDevice, type PageShot } from "../shared/types";
 
 /** A scroll field: digits become pixels, anything else is a CSS selector. */
 const scrollValue = (raw: string): number | string => (/^\s*\d+(\.\d+)?\s*$/.test(raw) ? Number(raw) : raw.trim());
 const percent = (n: number) => Math.round(n * 100);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+/** What the latest check of the page found, in one line. */
+function CheckLine({ check }: { check?: PageCheck | null }) {
+  if (check === undefined) return null;
+  if (!check) return <p className="field-hint">Not checked yet. Check links, or film the page, to check it.</p>;
+  const when = new Date(check.checkedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  return check.ok
+    ? <p className="field-hint">Checked {when}: {check.title ? `“${check.title}”` : "the page loaded"}{check.expect ? ", with the expected text" : ""}.</p>
+    : <p className="field-hint error">Checked {when}: {check.problem}</p>;
+}
+
 /**
  * Fields of a webpage shot: page, device, where it scrolls from and to, how it zooms, and what to hide.
  * `children` holds the shot's action buttons.
  */
-export function PageShotFields({ shot, format, onChange, children }: { shot: PageShot; format: Format; onChange: (shot: PageShot) => void; children?: React.ReactNode }) {
+export function PageShotFields({ shot, format, check, unlisted, onChange, children }: { shot: PageShot; format: Format; check?: PageCheck | null; unlisted?: boolean; onChange: (shot: PageShot) => void; children?: React.ReactNode }) {
   const set = (patch: Partial<PageShot>) => onChange({ ...shot, ...patch });
   const fallback = defaultPageDevice(format);
   return (
     <div className="page-shot">
       <input placeholder="Page URL, or a path on the target's base URL such as /pricing" value={shot.url} onChange={(e) => set({ url: e.target.value })} />
+      <div className="row">
+        <label className="grow" title="Shown above the link at the bottom of the shot. A credit makes this a source shot: a redirect to another page then fails the capture.">
+          Credit
+          <input placeholder="Outlet · Author" value={shot.credit ?? ""} onChange={(e) => set({ credit: e.target.value || undefined })} />
+        </label>
+        <label className="grow" title="Text the page must show, such as the headline. Capture fails when the page doesn't show it.">
+          Expected text
+          <input placeholder="The article's headline" value={shot.expect ?? ""} onChange={(e) => set({ expect: e.target.value || undefined })} />
+        </label>
+      </div>
+      <label title="A sentence or phrase exactly as the page writes it. The page then holds still on it and marks it word by word, and the scroll fields don't apply.">
+        Highlight
+        <input placeholder="A sentence the page shows" value={shot.highlight ?? ""} onChange={(e) => set({ highlight: e.target.value || undefined })} />
+      </label>
+      <label className="check"><input type="checkbox" checked={!shot.hideLink} onChange={(e) => set({ hideLink: e.target.checked ? undefined : true })} />Show the credit and link in the video</label>
+      <CheckLine check={check} />
+      {unlisted ? <p className="field-hint error">The news entries behind this post don't name this link. Check that it is the article the segment cites.</p> : null}
       <div className="row">
         <label>
           Device

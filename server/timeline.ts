@@ -8,6 +8,7 @@ import { defaultFraming } from "../shared/framing.js";
 import { spokenTurns } from "../shared/turns.js";
 import { getProject } from "./projects.js";
 import { projectVoices, usableTakes } from "./takes.js";
+import { pageUrl } from "./capture/browser/index.js";
 import { COMPARE_CAPTIONS, FORMAT_SIZE, type AudioClip, type Caption, type Post, type Format, type Material, type NarrationTake, type Segment, type TimelineBumper, type TimelineProps, type TimelineSegment, type Turn } from "../shared/types.js";
 
 const WORDS_PER_PAGE: Record<Format, number> = { portrait: 3, landscape: 7 };
@@ -114,6 +115,7 @@ export async function themeAssets(t = config().theme) {
     logoUrl: assetUrl(t.logo),
     fontUrl: assetUrl(t.displayFont),
     backgrounds: backgrounds.map((m) => mediaUrl(m.previewKey)),
+    ...(t.subtitlesOnTitleSlides === false ? { subtitlesOnTitleSlides: false } : {}),
   };
 }
 
@@ -168,6 +170,18 @@ export function scriptMaterialIds(segments: Segment[]): string[] {
 }
 
 /** `theme` replaces the saved theme, for previews of unsaved settings. */
+/** The source a segment shows: a slide's credit, or the page a webpage shot films, resolved against its target's base URL, unless the shot leaves the link out. */
+export function pageSource(visual: Segment["visual"]): TimelineSegment["source"] {
+  if (visual.type === "slide") return visual.credit?.trim() ? { credit: visual.credit.trim() } : undefined;
+  if (visual.type !== "capture" || visual.shot?.model !== "page" || visual.shot.hideLink || !visual.shot.url?.trim()) return undefined;
+  const settings = getProject().settings;
+  const target = settings.captureTargets.find((t) => t.id === (visual.targetId ?? settings.defaultCaptureTargetId));
+  let url = visual.shot.url.trim();
+  try { if (target?.kind === "browser") url = pageUrl(target.config, url); } catch { /* An invalid address is shown as entered; capture reports it. */ }
+  const credit = visual.shot.credit?.trim();
+  return { url, ...(credit ? { credit } : {}) };
+}
+
 export async function buildTimeline(ep: Post, format: Format, narrated: boolean, theme = config().theme): Promise<TimelineProps> {
   const script = ep.scripts[format];
   if (!script) throw new Error(`No ${format} script yet`);
@@ -255,6 +269,7 @@ export async function buildTimeline(ep: Post, format: Format, narrated: boolean,
       stackStaggerFrames: stackCount ? stackStagger(stackCount, speechMs, fps) : undefined,
       audio: audio.length ? audio : undefined,
       introFrames: startMs ? Math.round((startMs / 1000) * fps) : undefined,
+      source: pageSource(seg.visual),
     });
     for (const { turn, words, atMs } of lines) {
       const visible = captionWords(words);

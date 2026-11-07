@@ -105,6 +105,7 @@ function CaptureIndicator({ project }: { project: Project }) {
   const [status, setStatus] = useState<{ ok: boolean; detail?: string } | null>(null);
   const check = useCallback(() => { setStatus(null); api<{ ok: boolean; detail: string }>(`/api/projects/${project.id}/capture/${project.settings.defaultCaptureTargetId}/status`).then(setStatus, (e) => setStatus({ ok: false, detail: e.message })); }, [project.id, project.settings.defaultCaptureTargetId]);
   useEffect(check, [check]);
-  const browser = project.settings.captureTargets.find((t) => t.id === project.settings.defaultCaptureTargetId)?.kind === "browser";
-  return <Button variant="outline" size="sm" className={`pill ${status?.ok ? "ok" : status ? "bad" : ""}`} onClick={check} title={status?.detail}>{browser ? "Browser" : "Unity"} {status ? status.ok ? (browser ? "ready" : "connected") : "offline" : "…"}</Button>;
+  const kind = project.settings.captureTargets.find((t) => t.id === project.settings.defaultCaptureTargetId)?.kind;
+  const browser = kind === "browser";
+  return <Button variant="outline" size="sm" className={`pill ${status?.ok ? "ok" : status ? "bad" : ""}`} onClick={check} title={status?.detail}>{browser ? "Browser" : kind === "blender-mcp" ? "Blender" : "Unity"} {status ? status.ok ? (browser ? "ready" : "connected") : "offline" : "…"}</Button>;
 }

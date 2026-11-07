@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FEED_TEXT_LIMIT, feedRecord, type FeedDetail } from "../server/ingress/feeds.js";
+import { FEED_TEXT_LIMIT, feedRecord, textNamesLink, type FeedDetail } from "../server/ingress/feeds.js";
 import { isFeedCommit, matchesGlob } from "../server/discovery.js";
 
 const BRIEF = `📻 XR DAILY BRIEF — Friday, July 17, 2026\r\n\r\n🔥 TOP SIGNALS\r\n\r\n1. [HIGH] A headline\r\n   Source: Someone — Outlet (https://example.com/a-story/) — Jul 16, 2026\r\n`;
@@ -29,4 +29,11 @@ test("a commit that changes only feed files is the feed's delivery", () => {
   assert.equal(isFeedCommit([{ path: "xr-daily-brief-2026-07-17.txt" }, { path: "README.md" }], ["xr-daily-brief-*.txt"]), false);
   assert.equal(isFeedCommit([{ path: "xr-daily-brief-2026-07-17.txt" }], []), false);
   assert.equal(isFeedCommit([], ["*.txt"]), false);
+});
+
+test("a text names a link with or without its protocol and www", () => {
+  const brief = "Source: vr.org original (Jordan Kuo, vr.org/articles/google-play-audio-glasses); also https://www.example.com/a/b/";
+  assert.equal(textNamesLink(brief, "https://vr.org/articles/google-play-audio-glasses"), true);
+  assert.equal(textNamesLink(brief, "https://example.com/a/b"), true);
+  assert.equal(textNamesLink(brief, "https://opensource.googleblog.com/2026/11/"), false);
 });

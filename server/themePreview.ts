@@ -20,6 +20,7 @@ export async function themePreview(draft: Partial<StudioConfig["theme"]>, format
     // Unset in the draft means no bumper; the music stays as saved.
     intro: draft.intro ? { ...draft.intro, audio: saved.intro?.audio } : undefined,
     outro: draft.outro ? { ...draft.outro, audio: saved.outro?.audio } : undefined,
+    subtitlesOnTitleSlides: draft.subtitlesOnTitleSlides,
   };
   const backgrounds = (await getMaterials(projectId(), theme.backgroundMaterialIds)).filter((m) => m.kind === "image");
   const pictures = (backgrounds.length ? backgrounds : (await listMaterials(projectId())).filter((m) => m.kind === "image")).slice(0, 3);

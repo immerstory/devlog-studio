@@ -11,10 +11,11 @@ interface SceneObject {
 }
 
 /**
- * Picks a GameObject in the open Unity editor through MCP (read-only): search by name,
- * browse the hierarchy of all loaded scenes, or take the editor's current selection.
+ * Picks an object in the open editor through MCP (read-only): search by name,
+ * browse its hierarchy, or take the editor's current selection.
  */
-export function ObjectPicker({ onPick, targetId }: { targetId?: string; onPick: (path: string) => void }) {
+export function ObjectPicker({ onPick, targetId, editor = "Unity" }: { targetId?: string; onPick: (path: string) => void; editor?: "Unity" | "Blender" }) {
+  const selectionPlace = editor === "Blender" ? "the Outliner or 3D view" : "the Hierarchy or Scene view";
   const endpoint = targetId ? apiUrl("/api/state").replace(/state$/, `capture/${targetId}`) : "/api/unity";
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -50,7 +51,7 @@ export function ObjectPicker({ onPick, targetId }: { targetId?: string; onPick: 
     setErr("");
     try {
       const sel = await api<SceneObject[]>(`${endpoint}/selection`);
-      if (!sel.length) return setErr("Nothing is selected in Unity. Select an object in the Hierarchy or Scene view first.");
+      if (!sel.length) return setErr(`Nothing is selected in ${editor}. Select an object in ${selectionPlace} first.`);
       pick(sel[0].path);
     } catch (e) {
       setErr((e as Error).message);
@@ -62,7 +63,7 @@ export function ObjectPicker({ onPick, targetId }: { targetId?: string; onPick: 
     <div className="picker-wrap">
       <div className="row">
         <Button variant="outline" size="sm" onClick={() => setOpen(!open)}>{open ? "Close picker" : "Pick object…"}</Button>
-        <Button variant="outline" size="sm" onClick={useSelection} title="Use the object selected in Unity's Hierarchy or Scene view">Use Unity selection</Button>
+        <Button variant="outline" size="sm" onClick={useSelection} title={`Use the object selected in ${selectionPlace}`}>Use {editor} selection</Button>
       </div>
       {open ? (
         <div className="object-picker">

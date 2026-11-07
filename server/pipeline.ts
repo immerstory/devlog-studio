@@ -722,6 +722,9 @@ interface RawSegment {
     url?: string;
     device?: string;
     scrollTo?: string;
+    credit?: string;
+    expectText?: string;
+    highlightText?: string;
     motion: "still" | "orbit" | "push" | "pan" | "turn" | "rise";
     angle: ShotAngle;
     distance: ShotDistance;
@@ -742,7 +745,7 @@ export function normalizeScript(raw: { title: string; segments: RawSegment[]; me
     if (v.type === "capture" && v.shotModel === "page") {
       const scrollTo = v.scrollTo?.trim() ?? "";
       const device = v.device === "phone" || v.device === "desktop" ? v.device : undefined;
-      segments[i].visual = { type: "capture", targetId: v.targetId || undefined, description: v.description, shot: { ...newPageShot(v.url?.trim() ?? ""), device, scrollTo: /^\d+(\.\d+)?$/.test(scrollTo) ? Number(scrollTo) : scrollTo || 0 } };
+      segments[i].visual = { type: "capture", targetId: v.targetId || undefined, description: v.description, shot: { ...newPageShot(v.url?.trim() ?? ""), device, scrollTo: /^\d+(\.\d+)?$/.test(scrollTo) ? Number(scrollTo) : scrollTo || 0, ...(v.credit?.trim() ? { credit: v.credit.trim() } : {}), ...(v.expectText?.trim() ? { expect: v.expectText.trim() } : {}), ...(v.highlightText?.trim() ? { highlight: v.highlightText.trim() } : {}) } };
     } else if (v.type === "capture") {
       segments[i].visual = { type: "capture", targetId: v.targetId || undefined, description: v.description, shot: { model: "scene", target: v.target || undefined, angle: v.angle, distance: v.distance, motion: { type: v.motion || "still" } } };
     } else if (v.type === "material") {
@@ -765,6 +768,7 @@ export function normalizeScript(raw: { title: string; segments: RawSegment[]; me
         bullets: v.bullets.length ? v.bullets : undefined,
         imageFrom: imageFrom.length ? imageFrom : undefined,
         entrance: v.layout === "stack" ? v.entrance ?? "drop" : undefined,
+        ...(v.credit?.trim() ? { credit: v.credit.trim() } : {}),
       };
     }
   });

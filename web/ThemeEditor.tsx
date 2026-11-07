@@ -16,6 +16,7 @@ export interface ThemeSettings {
   backgroundMaterialIds: string[];
   intro?: BumperChoice;
   outro?: BumperChoice;
+  subtitlesOnTitleSlides?: boolean;
 }
 
 /** Swatches of a theme's colours, for the summary on the settings page. */
@@ -214,6 +215,7 @@ export function ThemeEditor({ open, onOpenChange, theme, images, reloadImages, o
             <div className="settings-subhead">Fonts and logo</div>
             <AssetField label="Slide font (headings, bullets, captions on photos)" kind="font" value={draft.displayFont} onChange={(a) => set((t) => { t.displayFont = a; })} emptyText="Default handwriting font" />
             <AssetField label="Logo on title slides" kind="image" value={draft.logo} onChange={(a) => set((t) => { t.logo = a; })} emptyText="No logo" />
+            <label className="check" title="Without subtitles, a title slide's heading carries the point while the narration plays."><input type="checkbox" checked={draft.subtitlesOnTitleSlides !== false} onChange={(e) => set((t) => { if (e.target.checked) delete t.subtitlesOnTitleSlides; else t.subtitlesOnTitleSlides = false; })} />Subtitles on title slides</label>
 
             <div className="settings-subhead">Slide backgrounds</div>
             <p className="muted small">Image materials, used in turn and blurred behind slides. Without any, slides use the video's own captures.</p>
