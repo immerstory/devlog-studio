@@ -235,7 +235,7 @@ export function MaterialAttach({ attached, all, onChange, attach, defaultDate, o
   const [notice, setNotice] = useState("");
   const byId = useMemo(() => new Map(all.map((m) => [m.id, m])), [all]);
   const items = useMemo<MediaItem[]>(
-    () => all.map((m) => ({ id: m.id, source: "library", thumb: mediaUrl(m.thumbKey), preview: mediaUrl(m.previewKey), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" })),
+    () => all.map((m) => ({ id: m.id, source: "library", thumb: mediaUrl(m.thumbKey), preview: largeImage(m), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" })),
     [all],
   );
   return (
@@ -328,6 +328,9 @@ function MaterialCard({ m, onSaved, onDeleted }: { m: Material; onSaved: () => v
   );
 }
 
+/** URL of a material's large still. The stored preview of a GIF is one JPEG frame, so a GIF uses its original file to keep moving. */
+export const largeImage = (m: Material) => mediaUrl(/\.gif$/i.test(m.key) ? m.key : m.previewKey);
+
 /** Editing a material: a large preview beside the fields. Saving or deleting closes it. */
 function MaterialDialog({ m, onClose, onSaved, onDeleted }: { m: Material | undefined; onClose: () => void; onSaved: () => unknown; onDeleted: (warning?: string) => void }) {
   return (
@@ -345,7 +348,7 @@ function MaterialDialog({ m, onClose, onSaved, onDeleted }: { m: Material | unde
             </DialogHeader>
             <div className="md-body">
               <a href={mediaUrl(m.key)} target="_blank" className="md-media" title="Open the original">
-                {m.kind === "video" ? <video src={mediaUrl(m.key)} poster={mediaUrl(m.previewKey)} controls muted playsInline preload="metadata" /> : <img src={mediaUrl(m.previewKey)} />}
+                {m.kind === "video" ? <video src={mediaUrl(m.key)} poster={mediaUrl(m.previewKey)} controls muted playsInline preload="metadata" /> : <img src={largeImage(m)} />}
               </a>
               <MaterialFields
                 key={materialKey(m)}

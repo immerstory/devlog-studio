@@ -10,7 +10,7 @@ import { ListInput } from "@/components/list-input";
 import { Button } from "@/components/ui/button";
 import { VideoPlayer } from "./VideoPlayer";
 import { api, apiUrl, projectHref, mediaUrl, useJob } from "./api";
-import { MaterialAttach, MaterialThumb } from "./Materials";
+import { largeImage, MaterialAttach, MaterialThumb } from "./Materials";
 import { SuggestionCard } from "./Calendar";
 import { SegTabs } from "@/components/seg-tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -449,7 +449,7 @@ function SegmentEditor(props: {
   const thumb = chosen ? mediaUrl(chosen.thumbKey) : media ? `${mediaUrl(media.replace(/\.mp4$/, ".jpg"))}?v=${seg.capturedAt ?? 0}` : undefined;
   const videoSrc = chosen ? (chosen.kind === "video" ? mediaUrl(chosen.key) : undefined) : media && /\.mp4$/.test(media) ? `${mediaUrl(media)}?v=${seg.capturedAt ?? 0}` : undefined;
   const [picker, setPicker] = useState<"material" | "slide" | null>(null);
-  const materialItem = (m: Material, source: MediaItem["source"]): MediaItem => ({ id: m.id, source, thumb: mediaUrl(m.thumbKey), preview: mediaUrl(m.previewKey), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" });
+  const materialItem = (m: Material, source: MediaItem["source"]): MediaItem => ({ id: m.id, source, thumb: mediaUrl(m.thumbKey), preview: largeImage(m), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" });
   const materialItems = [...epMaterials.map((m) => materialItem(m, "video")), ...others.map((m) => materialItem(m, "library"))];
   /** A segment's frame as slides show it: its material, or its capture for this format. */
   const segmentThumb = (s: Segment) => {
