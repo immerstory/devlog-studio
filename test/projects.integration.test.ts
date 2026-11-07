@@ -119,7 +119,10 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
     const { runBackfill, backfilledWeeks } = await import("../server/pipeline.js");
     const { collectCommits, commitDetails, commitRef } = await import("../server/discovery.js");
     const latest = (await inContext({ projectId: one.id }, () => collectCommits(["-1"], false)))[0];
-    const testDate = latest.date.slice(0, 10);
+    // Backfill asks git for a day in this machine's time zone, so the commit's day must be taken in it too: the author's
+    // date can be a day off, for example for a commit made just after midnight in another zone.
+    const { localDate } = await import("../server/ingress/provider.js");
+    const testDate = localDate(latest.date);
     const missing = "0000000000";
     const [byRef, byHash, unknown, invalid] = await inContext({ projectId: one.id }, () => commitDetails([commitRef(latest), latest.hash.slice(0, 10), `${latest.sourceId}:${missing}`, "not a commit"]));
     assert.equal(byRef.subject, latest.subject);

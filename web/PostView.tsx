@@ -104,9 +104,7 @@ export function PostView({ id, materials, suggestions, onChange }: { id: string;
         <input className="ep-title" value={ep.title} onChange={(e) => setEp({ ...ep, title: e.target.value })} onBlur={() => save({ title: ep.title })} />
         <label className="inline-field">
           Publish
-          {/* Saved on leaving the field: while a year is typed, the field passes through dates such as 0002-11-08. */}
-          <input type="date" value={ep.publishDate ?? ""} onChange={(e) => setEp({ ...ep, publishDate: e.target.value || undefined })} onBlur={() => save({ publishDate: ep.publishDate })} />
-          <input type="time" value={ep.publishTime ?? ""} title="Publish time; empty uses the default from Settings" onChange={(e) => setEp({ ...ep, publishTime: e.target.value || undefined })} onBlur={() => save({ publishTime: ep.publishTime })} />
+          <PublishFields date={ep.publishDate} time={ep.publishTime} onSave={save} />
         </label>
         <label className="check"><input type="checkbox" checked={ep.outputs.includes("portrait")} onChange={(e) => save({ outputs: e.target.checked ? [...new Set([...ep.outputs, "portrait" as Format])] : ep.outputs.filter((f) => f !== "portrait") })} /> Short 9:16</label>
         <label className="check"><input type="checkbox" checked={ep.outputs.includes("landscape")} onChange={(e) => save({ outputs: e.target.checked ? [...new Set([...ep.outputs, "landscape" as Format])] : ep.outputs.filter((f) => f !== "landscape") })} /> Video 16:9</label>
@@ -231,6 +229,21 @@ function QuestionsStep(props: {
         <Button onClick={async () => { await save({ questions: ep.questions }); next(); }}>Save answers and continue</Button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The publish date and time, saved on leaving a field. They keep their own draft, so typing changes nothing else on
+ * the page: while a year is typed, the field passes through dates such as 0002-11-08.
+ */
+function PublishFields({ date, time, onSave }: { date?: string; time?: string; onSave: (body: Partial<Post>) => Promise<void> }) {
+  const [draft, setDraft] = useState({ date: date ?? "", time: time ?? "" });
+  useEffect(() => { setDraft({ date: date ?? "", time: time ?? "" }); }, [date, time]);
+  return (
+    <>
+      <input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} onBlur={() => { if (draft.date !== (date ?? "")) void onSave({ publishDate: draft.date || undefined }); }} />
+      <input type="time" value={draft.time} title="Publish time; empty uses the default from Settings" onChange={(e) => setDraft({ ...draft, time: e.target.value })} onBlur={() => { if (draft.time !== (time ?? "")) void onSave({ publishTime: draft.time || undefined }); }} />
+    </>
   );
 }
 
