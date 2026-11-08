@@ -958,6 +958,13 @@ function FinalStep({ ep, format, run, busy, reload }: { ep: Post; format: Format
                 {yt?.connected && upload?.status !== "uploading" ? (
                   <Button disabled={busy} onClick={() => run(`/api/posts/${ep.id}/upload/${format}`)}>{upload?.status === "failed" ? "Retry upload" : "Upload to YouTube"}</Button>
                 ) : null}
+                {!yt?.connected && !upload ? (
+                  <span className="error small">
+                    {connectionId
+                      ? "Not uploaded: this YouTube connection isn't signed in. Reconnect it in Settings, then upload."
+                      : "Not uploaded: no YouTube connection was chosen. Withdraw the approval, choose a connection above, and approve again."}
+                  </span>
+                ) : null}
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => act(() => api(`/api/posts/${ep.id}/approve/${format}`, "DELETE"))}>Withdraw approval</Button>
               </div>
             ) : (
@@ -972,7 +979,11 @@ function FinalStep({ ep, format, run, busy, reload }: { ep: Post; format: Format
                 <span className="muted small">
                   {yt?.connected
                     ? `Uploads to ${yt.channelTitle ?? "your channel"}, ${when}. Set the publish date and time at the top.`
-                    : "Connect YouTube in Settings to upload automatically on approval."}
+                    : connections.length && !connectionId
+                      ? "No YouTube connection is chosen above, so approving only marks the video as final and uploads nothing. Choose a connection to upload on approval."
+                      : connectionId
+                        ? "This YouTube connection isn't signed in, so approving uploads nothing. Reconnect it in Settings first."
+                        : "Connect YouTube in Settings to upload automatically on approval."}
                 </span>
               </div>
             )}
