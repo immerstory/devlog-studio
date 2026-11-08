@@ -281,6 +281,7 @@ export async function runFeedProposals(log: Log, agent?: AgentKind, write = runA
   const proposed = new Set((await getValue<string[]>(pid, FEEDS_PROPOSED)) ?? []);
   const entries = (await listRecords(pid, { from: daysAgo(FEED_DAYS) })).filter((r) => r.kind === "feed" && r.visibility !== "excluded" && !proposed.has(r.id));
   log(`${entries.length} feed entr${entries.length === 1 ? "y" : "ies"} without topics.`);
+  const topics = getProject().settings.feedTopics ?? "briefing";
   let added = 0;
   for (const entry of entries) {
     throwIfCancelled();
@@ -288,11 +289,12 @@ export async function runFeedProposals(log: Log, agent?: AgentKind, write = runA
     const evidence = { entry: { id: entry.id, date: entry.date, ...(entry.detail as FeedDetail) }, existingSuggestions: existing.filter((s) => s.kind === "news").map(({ id, title, status, workDate }) => ({ id, title, status, workDate })) };
     const runId = newId("run");
     const { output, costUsd } = await write<{ suggestions: RawSuggestion[] }>({
-      prompt: feedPrompt(writeEvidence(runId, evidence), entry.date, existing.filter((s) => s.status !== "dismissed" && s.status !== "merged").map((s) => s.title)),
+      prompt: feedPrompt(writeEvidence(runId, evidence), entry.date, existing.filter((s) => s.status !== "dismissed" && s.status !== "merged").map((s) => s.title), topics),
       schema: SUGGESTIONS_SCHEMA, agent, log,
     });
     await saveRun(pid, runId, "feed", evidence, output); logCost(log, costUsd);
-    const fresh = output.suggestions.filter((s) => {
+    // A briefing is one suggestion per entry, whatever the agent returns.
+    const fresh = (topics === "briefing" ? output.suggestions.slice(0, 1) : output.suggestions).filter((s) => {
       const match = sameTitleSuggestion(s, existing);
       if (match) log(`"${s.title}" repeats "${match.title}" (${match.status}).`);
       return !match;

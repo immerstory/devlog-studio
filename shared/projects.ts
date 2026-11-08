@@ -11,6 +11,7 @@ export interface Source {
   feedGlobs?: string[];
   archived?: boolean;
 }
+export type FeedTopics = "briefing" | "story";
 export type UnityTargetConfig = StudioConfig["unity"]["mcp"] & { projectPath: string };
 /** `scene` keeps the engine the open file uses. */
 export type BlenderRenderEngine = "scene" | "eevee" | "workbench" | "cycles";
@@ -108,6 +109,8 @@ export interface ProjectSettings {
   coHost?: CoHostSettings;
   /** Connected activity beyond the project's Git sources. All are off until the developer turns them on. */
   activitySources?: ActivitySource[];
+  /** How a feed entry becomes suggestions: one briefing of its most relevant stories, or one suggestion per story. Absent means "briefing". */
+  feedTopics?: FeedTopics;
   /** A daily run of the intake while the app runs. Off when absent. */
   intake?: IntakeSchedule;
   theme: StudioConfig["theme"];

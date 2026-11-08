@@ -4,6 +4,7 @@ import { promptGuidance } from "../shared/archetypes.js";
 import { coHostPersona } from "../shared/cohost.js";
 import { spokenTurns } from "../shared/turns.js";
 import type { Post, Format, Script, Suggestion } from "../shared/types.js";
+import type { FeedTopics } from "../shared/projects.js";
 
 const opening = () => getProject().settings.archetype === "news"
   ? `You help an author turn their daily news brief, ${getProject().settings.description}, into Shorts and social posts.`
@@ -38,20 +39,32 @@ workDate: the YYYY-MM-DD the work happened (latest commit/edit of the group; for
 ${SUGGESTION_RULES(existingTitles)}`;
 }
 
-export function feedPrompt(evidenceFile: string, date: string, existingTitles: string[]) {
-  return `${studio()}
-
-This JSON file holds one entry of the project's news feed, dated ${date}: ${evidenceFile}
-The author compiled the entry from industry news. It can hold rated items with sources and quotes, the author's analysis, drafts of posts and internal notes. Propose topics for Shorts and social posts from it.
+export function feedPrompt(evidenceFile: string, date: string, existingTitles: string[], topics: FeedTopics = "briefing") {
+  const existing = existingTitles.length ? existingTitles.map((t) => `"${t}"`).join(", ") : "(none)";
+  const shared = `- Leave out internal notes: reminders, tagging ideas, people to contact, and notes about how the entry was made.
+- kind: "news". workDate: ${date}. recommendedFormat: "short". commits, files, notes and materials: empty lists. duplicateOf: an empty string.`;
+  const rules = topics === "story"
+    ? `Propose topics for Shorts and social posts from it.
 - One suggestion per news item that can carry a Short or a post on its own. A theme the entry follows over several days can also be a suggestion.
 - Take the items the entry rates as most important first. Where the entry rates an item, base appeal on that rating.
 - Write title, hook and summary in your own words. Name the outlet and the author of each source in the summary. Keep a quote only when it's short and attributed.
 - whyItMatters: the angle for the audience, usually taken from the entry's analysis.
 - The entry's draft posts and comment suggestions are the author's own words, and a suggestion can build on them.
-- Leave out internal notes: reminders, tagging ideas, people to contact, and notes about how the entry was made.
-- kind: "news". workDate: ${date}. recommendedFormat: "short". commits, files, notes and materials: empty lists. duplicateOf: an empty string.
+${shared}
 - suggestedShots: the source article as a webpage shot at its exact URL, and slides with the key number or quote.
-- Do not repeat these existing topics unless the entry adds something new: ${existingTitles.length ? existingTitles.map((t) => `"${t}"`).join(", ") : "(none)"}.
+- Do not repeat these existing topics unless the entry adds something new: ${existing}.`
+    : `Propose the day's briefing from it: exactly one suggestion that covers the day's most relevant stories.
+- Choose the three to five most relevant stories, in order of importance. Where the entry rates items, follow its rating. Leave out stories that these existing topics already covered, unless the entry adds something new: ${existing}.
+- title: the day's lead story first, so the title works on its own. hook: opens with the lead story.
+- summary: one short paragraph per chosen story, in order. Name the outlet and the author of each source. Keep a quote only when it's short and attributed.
+- Write title, hook and summary in your own words. whyItMatters: what the day's stories mean together for the audience, usually taken from the entry's analysis.
+- The entry's draft posts and comment suggestions are the author's own words, and the suggestion can build on them.
+${shared}
+- suggestedShots: for each chosen story, its source article as a webpage shot at its exact URL; slides only for a key number or quote.`;
+  return `${studio()}
+
+This JSON file holds one entry of the project's news feed, dated ${date}: ${evidenceFile}
+The author compiled the entry from industry news. It can hold rated items with sources and quotes, the author's analysis, drafts of posts and internal notes. ${rules}
 Return an empty list if nothing is worth a post.`;
 }
 

@@ -7,13 +7,13 @@ import { SecretInput } from "@/components/secret-input";
 import { SegTabs } from "@/components/seg-tabs";
 import { useProjectRuntimeSettings } from "./Settings";
 import { api, type AppState, type Job } from "./api";
-import { DEFAULT_PAGE_HEADERS, type BlenderRenderEngine, type BlenderTargetConfig, type BrowserTargetConfig, type CaptureTarget, type GlobalSettings, type Project, type PublicConnection, type UnityTargetConfig } from "../shared/projects";
+import { DEFAULT_PAGE_HEADERS, type BlenderRenderEngine, type BlenderTargetConfig, type BrowserTargetConfig, type CaptureTarget, type FeedTopics, type GlobalSettings, type Project, type PublicConnection, type UnityTargetConfig } from "../shared/projects";
 import { PathField } from "./PathField";
 import { IntakeScheduleSection } from "./IntakeSchedule";
 import { ArchetypePicker, PromptGuidanceField } from "./ArchetypeFields";
 import { CoHostSection } from "./CoHostFields";
 import { ActivitySourcesSection, EgressConnectionsSection } from "./PublishViews";
-import { BASE_URL_HINT, CONTENT_GLOBS_HINT, FEED_GLOBS_HINT, DEFAULT_TARGET_HINT, DESCRIPTION_HINT, descriptionExample, HEADER_ARGS_HINT, HEADER_HELPER_HINT, MCP_URL_HINT, NAME_HINT, PRIMARY_SOURCE_HINT, PUBLIC_TITLE_HINT, REQUEST_HEADERS_HINT, SLUG_HINT, SOURCE_LABEL_HINT, TARGET_CSS_HINT, TARGET_NAME_HINT, UNITY_PROJECT_HINT, USER_AGENT_HINT, WORKING_COPY_HINT } from "./project-fields";
+import { BASE_URL_HINT, CONTENT_GLOBS_HINT, FEED_GLOBS_HINT, FEED_TOPICS_HINT, DEFAULT_TARGET_HINT, DESCRIPTION_HINT, descriptionExample, HEADER_ARGS_HINT, HEADER_HELPER_HINT, MCP_URL_HINT, NAME_HINT, PRIMARY_SOURCE_HINT, PUBLIC_TITLE_HINT, REQUEST_HEADERS_HINT, SLUG_HINT, SOURCE_LABEL_HINT, TARGET_CSS_HINT, TARGET_NAME_HINT, UNITY_PROJECT_HINT, USER_AGENT_HINT, WORKING_COPY_HINT } from "./project-fields";
 
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 function Text({ label, hint, value, onChange, type = "text" }: { label: string; hint?: React.ReactNode; value?: string | number; onChange: (v: string) => void; type?: string }) {
@@ -135,6 +135,16 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
             <p className="field-hint">{PRIMARY_SOURCE_HINT}{usesOf(source.id) ? ` ${usesOf(source.id)} suggestion${usesOf(source.id) === 1 ? " uses" : "s use"} this source, so it can be archived and not deleted.` : ""}</p>
           </SettingsItem>
         ))}
+        {s.sources.some((x) => !x.archived && !!x.feedGlobs?.length) ? (
+          <label>
+            Topics from each feed entry
+            <select value={s.feedTopics ?? "briefing"} onChange={(e) => edit((p) => { p.settings.feedTopics = e.target.value as FeedTopics; })}>
+              <option value="briefing">One briefing of the most relevant stories</option>
+              <option value="story">One suggestion per story</option>
+            </select>
+            <span className="field-hint">{FEED_TOPICS_HINT}</span>
+          </label>
+        ) : null}
       </SettingsSection>
 
       <ActivitySourcesSection settings={s} active={tab === "sources"} onChange={(sources) => edit((p) => { p.settings.activitySources = sources; })} />

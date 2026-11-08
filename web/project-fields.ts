@@ -13,6 +13,7 @@ export const SLUG_HINT = "The project's part of the app's address, such as my-pr
 export const SOURCE_LABEL_HINT = "Your name for this source. The agent sees it next to the path.";
 
 export const FEED_GLOBS_HINT = "Files read for their text, such as a daily news brief, as comma-separated patterns like news/*.txt. Refresh activity stores each committed file as one entry, dated by a YYYY-MM-DD date in its name or else by its latest commit. Commits that change only these files don't count as work. Propose from feeds turns new entries into news topics.";
+export const FEED_TOPICS_HINT = "A briefing is one suggestion per entry that covers its three to five most relevant stories, for a daily roundup. Per story, each story that can carry a post on its own becomes its own suggestion. Applies to entries proposed from now on.";
 export const CONTENT_GLOBS_HINT = "Discover also reports uncommitted files that match these comma-separated patterns, such as *.unity or Assets/Scenes/**, so the agent can suggest topics from work you haven't committed. Each changed file can start an agent run. For tracked Unity scenes and prefabs, the agent sees the names of added objects; for other files, only the path and status. Commits always count. Leave this empty to use only commits, notes and materials.";
 
 export const PRIMARY_SOURCE_HINT = "The agent runs in this working copy, and it reads the other sources from there.";
