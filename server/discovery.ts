@@ -21,15 +21,21 @@ import { config } from "./config.js";
 
 const run = promisify(execFile);
 
+/**
+ * Git only reads the source repository: no index refresh and no clean filters. A clean filter such as Git LFS's
+ * stores every file it reads in the repository, which can collide with the developer's own Git work.
+ */
+const READ_ONLY = ["--no-optional-locks"];
+
 async function git(args: string[], maxBuffer = 64 * 1024 * 1024): Promise<string> {
-  const { stdout } = await run("git", args, { cwd: currentSource().path, maxBuffer, windowsHide: true });
+  const { stdout } = await run("git", [...READ_ONLY, ...args], { cwd: currentSource().path, maxBuffer, windowsHide: true });
   return stdout;
 }
 
 /** Runs git with data on stdin; avoids Windows command-line length limits for long path lists. */
 function gitStdin(args: string[], input: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, { cwd: currentSource().path, windowsHide: true });
+    const child = spawn("git", [...READ_ONLY, ...args], { cwd: currentSource().path, windowsHide: true });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
@@ -251,14 +257,21 @@ async function collectSourceEvidence(previous: Snapshot | undefined, notes: Evid
     if (st.includes("D") || !isContent(path)) continue;
     candidates.push({ path, status: st });
   }
-  const hashes = candidates.length ? (await gitStdin(["hash-object", "--stdin-paths"], candidates.map((c) => c.path).join("\n") + "\n")).trim().split("\n") : [];
+  // Hashes of the raw files, compared only with earlier snapshots.
+  const hashes = candidates.length ? (await gitStdin(["hash-object", "--no-filters", "--stdin-paths"], candidates.map((c) => c.path).join("\n") + "\n")).trim().split("\n") : [];
+  // Diffing a filtered file against HEAD runs its clean filter, and an LFS file only diffs as a pointer anyway.
+  const filtered = new Set<string>();
+  if (candidates.length) {
+    const attrs = (await gitStdin(["check-attr", "-z", "--stdin", "filter"], candidates.map((c) => c.path).join("\0") + "\0")).split("\0");
+    for (let i = 0; i + 2 < attrs.length; i += 3) if (attrs[i + 2] !== "unspecified" && attrs[i + 2] !== "unset") filtered.add(attrs[i]);
+  }
   const workingChanges: WorkingChange[] = [];
   for (let i = 0; i < candidates.length; i++) {
     const { path, status: st } = candidates[i];
     dirty[path] = hashes[i];
     if (previous?.dirty[path] === hashes[i]) continue;
     let objects: string[] = [];
-    if (SCENE_FILE.test(path) && st !== "??") objects = addedNames(await git(["diff", "-U0", "HEAD", "--", path]).catch(() => ""));
+    if (SCENE_FILE.test(path) && st !== "??" && !filtered.has(path)) objects = addedNames(await git(["diff", "-U0", "HEAD", "--", path]).catch(() => ""));
     workingChanges.push({ sourceId: currentSource().id, sourceLabel: currentSource().label, path, status: st, blob: hashes[i], addedObjects: objects });
   }
 
