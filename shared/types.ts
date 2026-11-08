@@ -133,6 +133,8 @@ export interface Material {
   width?: number;
   height?: number;
   durationSeconds?: number;
+  /** MP4 copy of an animated GIF, which videos play on a loop because a canvas only draws a GIF's first frame. */
+  clipKey?: string;
   title: string;
   /** The developer's story behind the material: context, anecdotes, what changed since. */
   annotation: string;
@@ -550,7 +552,7 @@ export interface TimelineSegment {
   /** Resolved URLs for the visual. */
   /** poster: still shown behind a video, covering the time after footage ends. */
   /** size and framing: a material's pixel size and the frames to ease between; absent for captured editor shots. */
-  media?: { src: string; kind: "image" | "video"; trimStartFrames?: number; playbackRate?: number; poster?: string; size?: { width: number; height: number }; framing?: Framing };
+  media?: { src: string; kind: "image" | "video"; trimStartFrames?: number; playbackRate?: number; /** Repeats the footage for as long as the segment lasts. */ loop?: boolean; poster?: string; size?: { width: number; height: number }; framing?: Framing };
   slideImages?: string[];
   /** Caption under each slide image, aligned with slideImages; empty for none. */
   slideCaptions?: string[];

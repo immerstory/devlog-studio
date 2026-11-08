@@ -34,6 +34,30 @@ export async function still(input: string, out: string, width: number, video: bo
   await run("ffmpeg", ["-y", "-loglevel", "error", ...seek, "-i", input, "-frames:v", "1", "-vf", `scale='min(${width},iw)':-2`, "-q:v", "3", out], { windowsHide: true });
 }
 
+const animatedGif = (m: Pick<Material, "fileName" | "durationSeconds">) => /\.gif$/i.test(m.fileName) && (m.durationSeconds ?? 0) > 0;
+
+/** H.264 copy of an animated GIF; the even size and 4:2:0 colour let browsers and the renderer decode it. */
+async function gifClip(input: string, out: string) {
+  await run("ffmpeg", ["-y", "-loglevel", "error", "-i", input, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", out], { windowsHide: true });
+}
+
+/** Adds the MP4 copy to an animated GIF that has none, and returns the material as stored. */
+export async function withClip(m: Material): Promise<Material> {
+  if (m.clipKey || !animatedGif(m)) return m;
+  const dir = path.join(CACHE_DIR, "uploads", m.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const clip = path.join(dir, "clip.mp4");
+  try {
+    await gifClip(await cached(m.key), clip);
+    const next = { ...m, clipKey: `materials/${m.id}/clip.mp4` };
+    await putFile(next.clipKey, clip);
+    await saveMaterial(projectId(), next);
+    return next;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** Stores an uploaded file as a material: original, thumbnail and preview go to Garage. */
 export async function ingestFile(file: string, fileName: string, fields: Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group" | "generated">>): Promise<Material> {
   const video = VIDEO.test(fileName);
@@ -46,6 +70,8 @@ export async function ingestFile(file: string, fileName: string, fields: Partial
   const preview = path.join(dir, "preview.jpg");
   await still(file, thumb, 480, video, info.durationSeconds);
   await still(file, preview, 1280, video, info.durationSeconds);
+  const clip = animatedGif({ fileName, durationSeconds: info.durationSeconds }) ? path.join(dir, "clip.mp4") : undefined;
+  if (clip) await gifClip(file, clip);
   const safeName = fileName.replace(/[^\w.\- ]+/g, "_");
   const m: Material = {
     id,
@@ -58,6 +84,7 @@ export async function ingestFile(file: string, fileName: string, fields: Partial
     key: `materials/${id}/${safeName}`,
     thumbKey: `materials/${id}/thumb.jpg`,
     previewKey: `materials/${id}/preview.jpg`,
+    ...(clip ? { clipKey: `materials/${id}/clip.mp4` } : {}),
     ...info,
     title: fields.title?.trim() || path.basename(fileName, path.extname(fileName)),
     annotation: fields.annotation?.trim() ?? "",
@@ -68,6 +95,7 @@ export async function ingestFile(file: string, fileName: string, fields: Partial
   await putFile(m.key, file);
   await putFile(m.thumbKey, thumb);
   await putFile(m.previewKey, preview);
+  if (clip && m.clipKey) await putFile(m.clipKey, clip);
   await saveMaterial(projectId(), m);
   fs.rmSync(dir, { recursive: true, force: true });
   return m;

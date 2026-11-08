@@ -87,7 +87,8 @@ class FootageDecoder {
   private wake?: () => void;
   readonly picture: Picture;
 
-  constructor(src: string, probe: VideoProbe, start: number) {
+  /** A looping decoder repeats the file without end, so `seek` only ever moves forward. */
+  constructor(src: string, probe: VideoProbe, start: number, loop = false) {
     const shrink = Math.min(1, MAX_FOOTAGE_SIDE / Math.max(probe.width, probe.height));
     const width = Math.round(probe.width * shrink);
     const height = Math.round(probe.height * shrink);
@@ -97,7 +98,7 @@ class FootageDecoder {
     // Untagged HD footage is BT.709, as browsers assume; the decoder's default would shift its colours.
     const matrix = probe.colorSpace && probe.colorSpace !== "unknown" ? probe.colorSpace : Math.min(width, height) >= 576 ? "bt709" : "smpte170m";
     const range = probe.colorRange === "pc" ? "full" : "limited";
-    this.process = spawn("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-ss", start.toFixed(3), "-i", src, "-an", "-vf", `fps=${probe.fps},scale=${width}:${height}:in_color_matrix=${matrix}:in_range=${range}:flags=bicubic,format=rgba`, "-f", "rawvideo", "-pix_fmt", "rgba", "-"], { windowsHide: true });
+    this.process = spawn("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", ...(loop ? ["-stream_loop", "-1"] : []), "-ss", start.toFixed(3), "-i", src, "-an", "-vf", `fps=${probe.fps},scale=${width}:${height}:in_color_matrix=${matrix}:in_range=${range}:flags=bicubic,format=rgba`, "-f", "rawvideo", "-pix_fmt", "rgba", "-"], { windowsHide: true });
     this.process.stderr.resume();
     this.process.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
     this.process.stdout.on("close", () => { this.ended = true; this.wake?.(); });
@@ -191,7 +192,7 @@ class FootagePlayer {
       let decoder = this.open.get(id);
       const seconds = footageSeconds(w.segment, this.fps, frame - w.start);
       if (!decoder) {
-        decoder = new FootageDecoder(w.segment.media!.src, this.probes.get(w.segment.media!.src)!, seconds);
+        decoder = new FootageDecoder(w.segment.media!.src, this.probes.get(w.segment.media!.src)!, seconds, w.segment.media!.loop);
         this.open.set(id, decoder);
       }
       await decoder.seek(seconds);

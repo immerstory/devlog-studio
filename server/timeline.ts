@@ -2,6 +2,7 @@ import { projectId } from "./context.js";
 import fs from "node:fs";
 import { config } from "./config.js";
 import { getMaterials } from "./store.js";
+import { withClip } from "./materials.js";
 import { bumperParams, bumperSeconds, bumperStyle, type BumperChoice, type ThemeAsset } from "../shared/bumpers.js";
 import { STACK_STAGGER_SECONDS, themeColors } from "../shared/types.js";
 import { defaultFraming } from "../shared/framing.js";
@@ -126,6 +127,7 @@ function segmentMedia(seg: Segment, format: Format, materials: Map<string, Mater
     const m = seg.visual.materialId ? materials.get(seg.visual.materialId) : undefined;
     if (!m) return undefined;
     const size = m.width && m.height ? { width: m.width, height: m.height } : undefined;
+    if (m.clipKey) return { src: mediaUrl(m.clipKey), kind: "video" as const, loop: true, seconds: m.durationSeconds ?? 0, trim: 0, poster: mediaUrl(m.previewKey), size, framing: size ? seg.visual.framing ?? defaultFraming(m.kind) : undefined };
     return { src: mediaUrl(m.key), kind: m.kind, seconds: m.durationSeconds ?? 0, trim: seg.visual.trimStart ?? 0, poster: mediaUrl(m.previewKey), size, framing: size ? seg.visual.framing ?? defaultFraming(m.kind) : undefined };
   }
   // A slide draws itself; footage it kept from an earlier visual never shows.
@@ -195,7 +197,7 @@ export async function buildTimeline(ep: Post, format: Format, narrated: boolean,
   const script = ep.scripts[format];
   if (!script) throw new Error(`No ${format} script yet`);
   const fps = config().render.fps;
-  const materials = new Map((await getMaterials(projectId(), scriptMaterialIds(script.segments))).map((m) => [m.id, m]));
+  const materials = new Map((await Promise.all((await getMaterials(projectId(), scriptMaterialIds(script.segments))).map(withClip))).map((m) => [m.id, m]));
   const takes = new Map(usableTakes(ep.narration[format] ?? [], script.segments, projectVoices()).map((t) => [t.turnId ?? t.segmentId, t]));
   const coHostColor = getProject().settings.coHost?.captionColor;
   const assets = await themeAssets(theme);
@@ -241,7 +243,8 @@ export async function buildTimeline(ep: Post, format: Format, narrated: boolean,
     if (media) {
       resolved = { src: media.src, kind: media.kind, poster: media.poster };
       if ("size" in media && media.size && media.framing) Object.assign(resolved, { size: media.size, framing: media.framing });
-      if (media.kind === "video") {
+      if ("loop" in media && media.loop) resolved.loop = true;
+      else if (media.kind === "video") {
         const segSeconds = durationInFrames / fps;
         const available = Math.max(0.1, media.seconds - media.trim);
         // Camera moves stretch or compress to fill the segment; recorded footage only slows down slightly

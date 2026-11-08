@@ -52,6 +52,7 @@ class PlaybackMedia {
       video.playsInline = true;
       video.volume = FOOTAGE_VOLUME;
       video.src = segment.media.src;
+      video.loop = !!segment.media.loop;
       video.addEventListener("seeked", onPicture);
       video.addEventListener("loadeddata", onPicture);
       this.videos.set(segment.id, video);
@@ -79,7 +80,8 @@ class PlaybackMedia {
       if (!video) continue;
       const visible = frame >= w.start && frame < w.end;
       const soon = !visible && frame < w.start && frame >= w.start - VIDEO_LEAD * fps;
-      const target = footageSeconds(w.segment, fps, Math.max(0, frame - w.start));
+      const elapsed = footageSeconds(w.segment, fps, Math.max(0, frame - w.start));
+      const target = w.segment.media?.loop && video.duration ? elapsed % video.duration : elapsed;
       if (visible && playing) {
         video.playbackRate = w.segment.media?.playbackRate ?? 1;
         // Past its end a video holds its last picture.

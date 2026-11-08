@@ -489,7 +489,7 @@ function SegmentEditor(props: {
   const media = seg.media?.[format];
   const chosen = v.type === "material" && v.materialId ? byId.get(v.materialId) : undefined;
   const thumb = chosen ? mediaUrl(chosen.thumbKey) : media ? `${mediaUrl(media.replace(/\.mp4$/, ".jpg"))}?v=${seg.capturedAt ?? 0}` : undefined;
-  const videoSrc = chosen ? (chosen.kind === "video" ? mediaUrl(chosen.key) : undefined) : media && /\.mp4$/.test(media) ? `${mediaUrl(media)}?v=${seg.capturedAt ?? 0}` : undefined;
+  const videoSrc = chosen ? (chosen.kind === "video" ? mediaUrl(chosen.key) : chosen.clipKey ? mediaUrl(chosen.clipKey) : undefined) : media && /\.mp4$/.test(media) ? `${mediaUrl(media)}?v=${seg.capturedAt ?? 0}` : undefined;
   const [picker, setPicker] = useState<"material" | "slide" | null>(null);
   const materialItem = (m: Material, source: MediaItem["source"]): MediaItem => ({ id: m.id, source, thumb: mediaUrl(m.thumbKey), preview: largeImage(m), title: m.title, date: m.date, group: m.group, annotation: m.annotation, isVideo: m.kind === "video" });
   const materialItems = [...epMaterials.map((m) => materialItem(m, "video")), ...others.map((m) => materialItem(m, "library"))];
