@@ -1142,7 +1142,8 @@ export async function narratePost(epId: string, format: Format, log: Log, force:
 
 /** Title, description and tags as published: description, chapters, hashtags (shorts) and the standard attribution. */
 export function publishPackage(script: Script, format: Format, chapterLines: string[], disclosure?: string): PublishPackage {
-  const hashtags = format === "portrait" ? ["#Shorts", ...script.metadata.tags.slice(0, 4).map((t) => `#${t.replace(/[^\p{L}\p{N}]+/gu, "")}`)].join(" ") : "";
+  // YouTube shows a Short's first three hashtags above its title: #Shorts and the two broadest tags, which come first.
+  const hashtags = format === "portrait" ? ["#Shorts", ...script.metadata.tags.slice(0, 2).map((t) => `#${t.replace(/[^\p{L}\p{N}]+/gu, "")}`)].join(" ") : "";
   const attribution = config().publishing.attribution.trim();
   const description = [script.metadata.description.trim(), disclosure, chapterLines.join("\n"), hashtags, attribution].filter(Boolean).join("\n\n");
   return { title: script.metadata.title.trim(), description, tags: script.metadata.tags };

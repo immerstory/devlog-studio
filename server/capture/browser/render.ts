@@ -173,7 +173,9 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
         }
         for (const v of document.querySelectorAll("video")) {
           if (!c.base.has(v)) { c.base.set(v, v.currentTime - before / 1000); v.pause(); }
-          v.currentTime = c.base.get(v) + c.t / 1000;
+          // A looping video starts over at its end, as it would on the page; others hold their last picture.
+          const at = c.base.get(v) + c.t / 1000;
+          v.currentTime = v.loop && v.duration > 0 && isFinite(v.duration) ? at % v.duration : at;
         }
       };
       true`);

@@ -414,8 +414,8 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
           <details>
             <summary>Platform metadata</summary>
             <label>Title<input value={script.metadata.title} onChange={(e) => update((s) => (s.metadata.title = e.target.value))} /></label>
-            <label>Description<textarea rows={4} value={script.metadata.description} onChange={(e) => update((s) => (s.metadata.description = e.target.value))} /></label>
-            <label>Tags<ListInput value={script.metadata.tags} onChange={(tags) => update((s) => (s.metadata.tags = tags))} /></label>
+            <label>Description<textarea rows={4} value={script.metadata.description} onChange={(e) => update((s) => (s.metadata.description = e.target.value))} /><span className="field-hint">Viewers see it. Leave out hashtags: for a Short, the published description ends with #Shorts and hashtags made from the first two tags, which YouTube shows above the title.</span></label>
+            <label>Tags<ListInput value={script.metadata.tags} onChange={(tags) => update((s) => (s.metadata.tags = tags))} /><span className="field-hint">YouTube's Tags field: viewers don't see them, and YouTube says they play only a minimal role in discovery, mostly for words people often misspell. Use 5–8 terms that describe what the video shows, without #, and put the two broadest first: a Short turns them into its hashtags. Unrelated or too many tags can count as misleading metadata.</span></label>
           </details>
         </>
       ) : null}

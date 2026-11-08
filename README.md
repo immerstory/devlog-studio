@@ -219,7 +219,7 @@ Co-hosted videos declare synthetic media on YouTube and add a line naming the AI
 ## Publishing
 
 1. **Attribution.** Under **Settings > Publishing**, enter the text every description ends with: music licence IDs, credits, links.
-2. **Final render.** The Final step shows the video and exactly what gets published: title, description (your description, chapters for landscape, `#Shorts` and hashtags for portrait, then the attribution) and tags. Change the text in **Script & shots > Platform metadata** or in Settings, then render the final again.
+2. **Final render.** The Final step shows the video and exactly what gets published: title, description (your description, chapters for landscape, `#Shorts` and hashtags made from the first two tags for portrait, then the attribution) and tags. Change the text in **Script & shots > Platform metadata** or in Settings, then render the final again.
 3. **Approval.** **Approve & upload to YouTube** is the final OK. It uploads right away: scheduled for the episode's publish date and time (top of the episode; the default time comes from Settings), or, without a date or with a date already past, published as set under **Without a publish date**. A scheduled video stays private on YouTube until then. The subtitles are added as an English caption track. A new final render clears the approval.
 
 **Connecting YouTube:**
