@@ -192,7 +192,7 @@ export interface SceneShot {
   fov?: number;
   /** Vertical field of view at the end: the lens zooms from fov to fovEnd during the shot. Same as the start when absent. */
   fovEnd?: number;
-  /** Orbit and push centre for an explicit pose: the first surface in the middle of the Scene view when the pose was taken, else 20 m ahead. */
+  /** Orbit and push centre for an explicit pose: in Unity the first surface in the middle of the Scene view when the pose was taken, else 20 m ahead; in Blender the 3D cursor. */
   pivot?: Vec3;
   /** Name of the object the pivot lies on; absent when the view's middle hit nothing. */
   pivotObject?: string;

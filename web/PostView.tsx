@@ -30,16 +30,17 @@ const MOTION_UNIT: Record<MotionType, string> = { still: "", orbit: "°", push: 
 const MOTIONS: Array<{ type: MotionType; label: string; help: string }> = [
   { type: "still", label: "Still", help: "No camera move: one frame, held for the whole segment." },
   { type: "orbit", label: "Orbit", help: "Swings around the shot's centre by the given degrees, from half to one side of the framing to half to the other." },
-  { type: "push", label: "Push in", help: "Moves toward the shot's centre (the target, or what the middle of the Scene view shows) by the given fraction of the distance." },
+  { type: "push", label: "Push in", help: "Moves toward the shot's centre (the target, what the middle of Unity's Scene view shows, or Blender's 3D cursor) by the given fraction of the distance." },
   { type: "pan", label: "Pan", help: "Slides sideways by the given metres, view direction unchanged, centred on the framing." },
   { type: "turn", label: "Turn", help: "Swivels on the spot by the given degrees, centred on the framing." },
   { type: "rise", label: "Rise", help: "Moves straight up by the given metres." },
 ];
 /** Where push and orbit centre a Scene view pose, for the label under the shot. */
-function sceneCentre(position: [number, number, number], pivot?: [number, number, number], object?: string) {
+function sceneCentre(position: [number, number, number], pivot?: [number, number, number], object?: string, cursor = false) {
   if (!pivot) return "centre 20 m ahead";
   const metres = Math.hypot(pivot[0] - position[0], pivot[1] - position[1], pivot[2] - position[2]);
   const distance = metres < 10 ? metres.toFixed(1) : Math.round(metres).toString();
+  if (cursor) return `centre on the 3D cursor, ${distance} m away`;
   return object ? `centre on ${object}, ${distance} m ahead` : `nothing in the middle of the view; centre ${distance} m ahead`;
 }
 const MOTION_HELP = Object.fromEntries(MOTIONS.map((m) => [m.type, m.help])) as Record<MotionType, string>;
@@ -661,8 +662,8 @@ function SegmentEditor(props: {
               </Button>
               {takeButton}
               {v.pose ? (
-                <span className="muted small" title="Push and orbit move around this centre. To change it, point the middle of the Scene view at another spot and use the Scene view again.">
-                  Scene view pose · {sceneCentre(v.pose.position, v.pivot, v.pivotObject)}
+                <span className="muted small" title={blender(v.targetId) ? "Push and orbit move around this centre. To change it, place the 3D cursor in Blender and use the 3D view again." : "Push and orbit move around this centre. To change it, point the middle of the Scene view at another spot and use the Scene view again."}>
+                  {blender(v.targetId) ? "3D view" : "Scene view"} pose · {sceneCentre(v.pose.position, v.pivot, v.pivotObject, blender(v.targetId))}
                 </span>
               ) : null}
             </div>

@@ -120,7 +120,7 @@ emit({
     "forward": list(rotation @ Vector((0, 0, -1))),
     "up": list(rotation @ Vector((0, 1, 0))),
     "fov": fov,
-    "pivot": list(view.view_location),
+    "pivot": list(SCENE.cursor.location),
 })
 `,
   frame: String.raw`
