@@ -922,7 +922,7 @@ function FinalStep({ ep, format, run, busy, reload }: { ep: Post; format: Format
 
   return (
     <div className="panel">
-      <label>YouTube connection<select disabled={busy || !!r?.approvedAt || uploaded} value={connectionId} onChange={(e) => setConnectionId(e.target.value)}><option value="">Choose connection</option>{connections.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.channelTitle ?? "Disconnected"}</option>)}</select></label>
+      <label>YouTube connection<select disabled={busy || uploaded || upload?.status === "uploading"} value={connectionId} onChange={(e) => setConnectionId(e.target.value)}><option value="">Choose connection</option>{connections.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.channelTitle ?? "Disconnected"}</option>)}</select></label>
       <p className="muted">Full-resolution H.264/AAC MP4 at -14 LUFS, with an .srt file. Watch it, check the text, then give the final OK.</p>
       <div className="row">
         <Button variant={r?.final ? "outline" : "default"} disabled={busy} onClick={() => run(`/api/posts/${ep.id}/render/${format}`, { quality: "final" })}>
@@ -956,13 +956,13 @@ function FinalStep({ ep, format, run, busy, reload }: { ep: Post; format: Format
                 {upload?.status === "uploading" && busy ? <span className="row muted small"><Spinner /> Uploading…</span> : null}
                 {upload?.status === "failed" ? <span className="error small">Upload failed: {upload.error}</span> : null}
                 {yt?.connected && upload?.status !== "uploading" ? (
-                  <Button disabled={busy} onClick={() => run(`/api/posts/${ep.id}/upload/${format}`)}>{upload?.status === "failed" ? "Retry upload" : "Upload to YouTube"}</Button>
+                  <Button disabled={busy} onClick={() => run(`/api/posts/${ep.id}/upload/${format}`, { connectionId })}>{upload?.status === "failed" ? "Retry upload" : "Upload to YouTube"}</Button>
                 ) : null}
                 {!yt?.connected && !upload ? (
                   <span className="error small">
                     {connectionId
                       ? "Not uploaded: this YouTube connection isn't signed in. Reconnect it in Settings, then upload."
-                      : "Not uploaded: no YouTube connection was chosen. Withdraw the approval, choose a connection above, and approve again."}
+                      : "Not uploaded: choose a YouTube connection above, then upload."}
                   </span>
                 ) : null}
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => act(() => api(`/api/posts/${ep.id}/approve/${format}`, "DELETE"))}>Withdraw approval</Button>

@@ -494,7 +494,20 @@ projectApi.post(
   }),
 );
 projectApi.delete("/posts/:id/approve/:format", h((req) => videoOutput(fmt(req)).revokeApproval(param(req, "id"), fmt(req))));
-projectApi.post("/posts/:id/upload/:format", epJob("upload", (req, log) => videoOutput(fmt(req)).upload(param(req, "id"), fmt(req), log)));
+/** Uploads an approved video; a connectionId chosen after the approval becomes the video's connection first. */
+projectApi.post(
+  "/posts/:id/upload/:format",
+  h(async (req) => {
+    const id = param(req, "id");
+    const format = fmt(req);
+    await loadPost(projectId(), id);
+    if (req.body?.connectionId) {
+      getConnection(req.body.connectionId);
+      await updatePost(projectId(), id, (p) => { p.renders[format] = { ...p.renders[format], connectionId: req.body.connectionId }; });
+    }
+    return startJob("upload", id, (log) => videoOutput(format).upload(id, format, log));
+  }),
+);
 projectApi.get("/posts/:id/publish-moment", h(async (req) => ({ publishAt: publishMoment(await loadPost(projectId(), param(req, "id"))) ?? null })));
 
 // ---------- jobs, unity, settings ----------
