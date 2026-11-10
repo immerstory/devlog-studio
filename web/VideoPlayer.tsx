@@ -37,10 +37,48 @@ const browserPlatform: Platform = {
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
 /** Sounds and videos of one timeline, kept in step with the playhead. */
+/**
+ * A near-silent signal that keeps the audio output open while the player plays. Bluetooth headsets and some sound
+ * devices close an output that falls silent and fade it back in when sound returns, which would swallow the start of
+ * every narration line, because each line is its own audio element.
+ */
+class OutputKeepAlive {
+  private context?: AudioContext;
+
+  start() {
+    if (this.context) {
+      if (this.context.state === "suspended") void this.context.resume();
+      return;
+    }
+    try {
+      const context = new AudioContext();
+      const signal = context.createConstantSource();
+      const gain = context.createGain();
+      // About -80 dB: far below hearing, but not silence, which some devices treat as idle.
+      gain.gain.value = 0.0001;
+      signal.connect(gain).connect(context.destination);
+      signal.start();
+      this.context = context;
+    } catch {
+      // Without Web Audio the player plays as before.
+    }
+  }
+
+  stop() {
+    if (this.context?.state === "running") void this.context.suspend();
+  }
+
+  dispose() {
+    void this.context?.close();
+    this.context = undefined;
+  }
+}
+
 class PlaybackMedia {
   readonly videos = new Map<string, HTMLVideoElement>();
   private readonly sounds: Array<{ item: ScheduledAudio; element: HTMLAudioElement }>;
   private readonly t: TimelineProps;
+  private readonly keepAlive = new OutputKeepAlive();
   private muted = false;
 
   constructor(t: TimelineProps, onPicture: () => void) {
@@ -73,6 +111,8 @@ class PlaybackMedia {
 
   /** Puts everything where the playhead says. `playing` false shows the exact picture for a still. */
   sync(frame: number, playing: boolean) {
+    if (playing && !this.muted) this.keepAlive.start();
+    else this.keepAlive.stop();
     const { fps } = this.t;
     const now = frame / fps;
     for (const w of segmentWindows(this.t)) {
@@ -102,10 +142,10 @@ class PlaybackMedia {
         if (element.paused) element.play().catch(() => {});
       } else if (!element.paused) element.pause();
     }
-    void this.muted;
   }
 
   dispose() {
+    this.keepAlive.dispose();
     for (const video of this.videos.values()) {
       video.pause();
       video.removeAttribute("src");
