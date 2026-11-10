@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer, { type Browser, type CDPSession, type Page } from "puppeteer-core";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { Browser as BrowserKind, computeExecutablePath, install } from "@puppeteer/browsers";
 import { CACHE_DIR } from "../../config.js";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
@@ -37,6 +38,20 @@ export async function blockedReason(page: Page, status?: number): Promise<string
   return [status && statusBlock ? `HTTP ${status}` : "", title ? `“${title.slice(0, 80)}”` : ""].filter(Boolean).join(", ") || "bot check";
 }
 
+/**
+ * Cuts a region given in CSS pixels out of a viewport picture rendered at `pixelsPerCss`, and scales it to the output
+ * size. Fractional edges are interpolated, so a region that moves by less than a pixel moves smoothly.
+ */
+async function cropFrame(png: Buffer, region: { x: number; y: number; width: number; height: number }, pixelsPerCss: number, output: { width: number; height: number }): Promise<Buffer> {
+  const picture = await loadImage(png);
+  const canvas = createCanvas(output.width, output.height);
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(picture, region.x * pixelsPerCss, region.y * pixelsPerCss, region.width * pixelsPerCss, region.height * pixelsPerCss, 0, 0, output.width, output.height);
+  return canvas.encode("png");
+}
+
 /** Consecutive frames without a picture after which filming gives up: one second at 30 fps. */
 const STUCK_LIMIT = 30;
 
@@ -48,6 +63,12 @@ export interface PageFrame {
   /** Zoom centre as fractions of the viewport. */
   focusX: number;
   focusY: number;
+  /**
+   * The closest zoom of the whole shot. A shot that zooms renders every frame at this one resolution and crops it
+   * with sub-pixel precision, because Chrome rasterizes text differently at each scale and snaps a screenshot's clip
+   * to whole device pixels, so a zoom filmed through the screenshot's own scale wobbles.
+   */
+  rasterZoom?: number;
 }
 
 export interface PageSession {
@@ -116,7 +137,11 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
       ...opts.hide.filter((s) => s.trim()).map((s) => `${s} { display: none !important; }`),
     ].join("\n");
     await page.addStyleTag({ content: css });
-    const check = await inspectPage(page, opts.url, response, opts.source ?? {});
+    // A shot's script can reveal the sentence to highlight, for example by opening a tab, so with a script the
+    // sentence is looked for once the script has run (below), not in the page as it loads.
+    const deferHighlight = !!opts.script?.trim() && !!opts.source?.highlight?.trim();
+    const check = await inspectPage(page, opts.url, response, deferHighlight ? { ...opts.source, highlight: undefined } : opts.source ?? {});
+    if (deferHighlight) check.highlight = opts.source!.highlight!.trim();
     await opts.onCheck?.(check);
     if (check.finalUrl) opts.log(`The page is now at ${check.finalUrl}.`);
     if (!check.ok) {
@@ -247,7 +272,9 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
         // forever. Letting page time run freely releases it; CSS animations and videos keep their exact
         // timing because each frame sets them, only script-driven effects may jump at that frame. If even
         // that does not help, the frame repeats the previous picture, and a page that stays stuck fails.
-        const request = cdp.send("Page.captureScreenshot", { format: "png", clip: { x: scroll.x + x, y: scroll.y + y, width: w, height: h, scale: zoom * scale }, captureBeyondViewport: false });
+        const raster = f.rasterZoom !== undefined && f.rasterZoom > 1 ? Math.max(zoom, f.rasterZoom) : undefined;
+        const clip = raster ? { x: scroll.x, y: scroll.y, width, height, scale: raster * scale } : { x: scroll.x + x, y: scroll.y + y, width: w, height: h, scale: zoom * scale };
+        const request = cdp.send("Page.captureScreenshot", { format: "png", clip, captureBeyondViewport: false });
         request.catch(() => {});
         const within = (ms: number) => Promise.race([request, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
         let shot = await within(1500);
@@ -260,6 +287,7 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
         let image: Buffer;
         if (shot) {
           image = Buffer.from(shot.data, "base64");
+          if (raster) image = await cropFrame(image, { x, y, width: w, height: h }, raster * scale, opts.output);
           lastFrame = image;
           stuck = 0;
         } else {

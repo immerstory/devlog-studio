@@ -57,7 +57,7 @@ async function render(target: BrowserTargetConfig, shot: PageShot, out: CaptureO
       const t = frames === 1 ? 0 : pageMoveProgress(shot, (i / (frames - 1)) * shotSeconds, shotSeconds, Math.abs(to - from));
       // Content that loads late above the sentence pushes it down, so a highlight follows it on every frame.
       const scrollY = still === undefined ? from + (to - from) * t : await session.run<number>(highlightScroll);
-      await session.frame({ scrollY, zoom: shot.zoomFrom + (shot.zoomTo - shot.zoomFrom) * t, focusX: shot.focus.x, focusY: shot.focus.y }, step, frameFile(i));
+      await session.frame({ scrollY, zoom: shot.zoomFrom + (shot.zoomTo - shot.zoomFrom) * t, focusX: shot.focus.x, focusY: shot.focus.y, rasterZoom: Math.max(shot.zoomFrom, shot.zoomTo) }, step, frameFile(i));
     };
     let lastLogged = 0;
     const progress = (done: number) => {
