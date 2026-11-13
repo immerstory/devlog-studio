@@ -256,6 +256,24 @@ export async function matchSourceFiles(source: Source, log: (line: string) => vo
   return { files, paths: new Set(tree.keys()), held, errors };
 }
 
+/**
+ * The last match of each source. It stays valid while the source's commit, its rules and the commits of the other
+ * active sources, where dates are looked up, stay the same.
+ */
+const lastMatches = new Map<string, { key: string; match: SourceMatch }>();
+async function matchOnce(pid: string, source: Source, log: (line: string) => void): Promise<SourceMatch> {
+  const heads = await Promise.all(activeSources().map(async (s) => `${s.id}:${(await git(s.path, ["rev-parse", "--verify", "-q", "HEAD"]).catch(() => "")).trim()}`));
+  const key = JSON.stringify([pid, source.path, source.materialRules ?? [], heads]);
+  const last = lastMatches.get(source.id);
+  if (last?.key === key) {
+    log(`${source.label}: no new commits or rule changes since the last import.`);
+    return last.match;
+  }
+  const match = await matchSourceFiles(source, log);
+  lastMatches.set(source.id, { key, match });
+  return match;
+}
+
 export interface ImportIO {
   ingest: (file: string, fileName: string, fields: MaterialFields, options: IngestOptions) => Promise<Material>;
   removeFiles: (prefix: string) => Promise<void>;
@@ -364,7 +382,7 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
   for (const source of sources) {
     let match: SourceMatch;
     try {
-      match = await matchSourceFiles(source, log);
+      match = await matchOnce(pid, source, log);
       result.errors.push(...match.errors);
     } catch (err) {
       const message = `${source.label}: ${(err as Error).message}`;

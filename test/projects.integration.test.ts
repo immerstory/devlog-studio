@@ -161,14 +161,18 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal(materials.get("releases/0.2/hut.png")!.date, "2026-11-01", "without metadata, the first commit dates the file");
           assert.equal(materials.get("releases/0.3/lake.png")!.title, "lake");
 
-          assert.deepEqual(await importSourceMaterials(() => {}, io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, inbox: 0, errors: first.errors }, "unchanged files aren't stored again");
+          const lines: string[] = [];
+          assert.deepEqual(await importSourceMaterials((l) => lines.push(l), io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, inbox: 0, errors: first.errors }, "unchanged files aren't stored again");
+          assert.ok(lines.some((l) => /Media: no new commits or rule changes/.test(l)), "an unchanged source isn't scanned again");
 
           await store.saveMaterial(project.id, (await import("../server/sourceMaterials.js")).withEdits(forest, { ...forest, title: "My title" }));
           media.write("releases/0.3/materials.json", { folder: { commit: build, tags: ["release"] }, files: { "forest.png": { title: "Forest at night", annotation: "Night light." }, "old.png": { exclude: true } } });
           media.write("releases/0.2/hut.png", "new hut pixels");
           media.remove("releases/0.3/lake.png");
           media.commit("Update sets");
-          const second = await importSourceMaterials(() => {}, io);
+          lines.length = 0;
+          const second = await importSourceMaterials((l) => lines.push(l), io);
+          assert.ok(!lines.some((l) => /no new commits/.test(l)), "a new commit scans the source again");
           assert.deepEqual([second.added, second.updated, second.moved, second.removed, second.skipped], [0, 2, 1, 0, 0], "forest and hut change; lake.png is gone and twin.png has its content, so lake's material moves there");
           materials = await byPath();
           const after = materials.get("releases/0.3/forest.png")!;

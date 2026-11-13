@@ -304,6 +304,7 @@ A source can supply materials from its committed images and videos, for example 
 
 The import only reads the source. It reads committed files only and doesn't change the working copy. Files stored with Git LFS are left out, because the commit holds only a pointer to them, and the task log names them.
 
+- A source is scanned again only after a new commit in it or in another active source, or a change to its rules. A restart of the app scans it once more.
 - A file is stored again only when its content changes. A file with the same content as another imported file or inbox file is skipped. When that other file has left the same source, the file was moved or renamed, and its material moves with it.
 - When the metadata changes, the material changes with it. A title, annotation, date, tag list or group that you edit in the app stays as you edited it.
 - A material whose file leaves the source, or no longer matches a rule, stays and is marked as no longer in its source.
