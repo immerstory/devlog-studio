@@ -192,10 +192,13 @@ export const removeMaterial = (id: string, removeFiles = deletePrefix) => delete
 /** The number of imported materials that one agent run sees at most, so a large source can't flood a run with images. */
 export const IMPORTED_PER_RUN = 12;
 
-/** Keeps every uploaded material and the first IMPORTED_PER_RUN imported ones, in the order given. */
-export function limitImported(materials: Material[], log?: (line: string) => void): Material[] {
+/**
+ * Keeps every uploaded material, every material attached to a suggestion or a post, and the first IMPORTED_PER_RUN of
+ * the other imported ones, in the order given. Attaching is the developer's choice, so it isn't limited.
+ */
+export function limitImported(materials: Material[], attached: ReadonlySet<string>, log?: (line: string) => void): Material[] {
   let imported = 0;
-  const kept = materials.filter((m) => !m.origin || imported++ < IMPORTED_PER_RUN);
+  const kept = materials.filter((m) => !m.origin || attached.has(m.id) || imported++ < IMPORTED_PER_RUN);
   const left = materials.length - kept.length;
   if (left && log) log(`Left out ${left} imported material${left === 1 ? "" : "s"}, because a run sees at most ${IMPORTED_PER_RUN}. Attach them to a suggestion or a post to use them.`);
   return kept;

@@ -136,6 +136,8 @@ async function storeSuggestions(raw: RawSuggestion[], knownMaterials: Set<string
   return ids;
 }
 
+/** Materials that a suggestion or a post uses. */
+const attachedMaterials = async (pid: string) => new Set([...(await listSuggestions(pid)).flatMap((s) => s.materialIds ?? []), ...(await listPosts(pid)).flatMap((p) => p.materialIds ?? [])]);
 const openTitles = async () => (await listSuggestions(projectId())).filter((s) => s.status !== "dismissed" && s.status !== "merged").map((s) => s.title);
 function normalizeAgentCommits<T extends { commits: string[] }>(suggestions: T[], commits: Evidence["commits"], log: Log): T[] {
   return suggestions.map((suggestion) => {
@@ -150,7 +152,7 @@ export async function runDiscovery(log: Log, agent?: AgentKind, write = runAgent
   const since = latestSnapshotTime(previous);
   const notes = (await listNotes(projectId())).filter((n) => !since || n.createdAt > since).map((n) => ({ date: n.date, text: n.text }));
   const firstDay = localDate(since ? new Date(since) : new Date(Date.now() - config().discovery.initialDays * 86400_000));
-  const materials = limitImported(progressMaterials(await listMaterials(projectId(), { createdAfter: since }), firstDay), log);
+  const materials = limitImported(progressMaterials(await listMaterials(projectId(), { createdAfter: since }), firstDay), await attachedMaterials(projectId()), log);
   log(`Collecting evidence since ${since ?? `${config().discovery.initialDays} days ago`}…`);
   const agentMaterials = await materialsForAgent(materials);
   const { evidence, snapshot } = await collectEvidence(previous, notes, agentMaterials.lines);
@@ -219,7 +221,7 @@ export async function runBackfill(from: string, to: string, rerun: boolean, log:
     const existing = (await listSuggestions(projectId())).filter((s) => s.status !== "merged" && s.status !== "dismissed");
     const partial = pending.length < sources.length;
     const weekNotes = partial ? [] : notes.filter((n) => n.date >= week.from && n.date <= week.to).map((n) => ({ date: n.date, text: n.text }));
-    const materials = partial ? [] : limitImported(await listMaterials(projectId(), { from: week.from, to: week.to }), log);
+    const materials = partial ? [] : limitImported(await listMaterials(projectId(), { from: week.from, to: week.to }), await attachedMaterials(projectId()), log);
     if (commits.length || weekNotes.length || materials.length) {
       const agentMaterials = await materialsForAgent(materials);
       const evidence = { range: { since: week.from, toCommit: week.to }, sources: sources.filter((s) => pending.includes(s.id)), commits, workingChanges: [], notes: weekNotes, materials: agentMaterials.lines, existingSuggestions: existing.map(({ id, title, summary }) => ({ id, title, summary })) };
@@ -333,7 +335,7 @@ export async function runSessionReview(from: string, to: string, rerun: boolean,
     const sessions = (await listRecords(pid, week)).filter((r) => r.kind === "session" && r.visibility !== "excluded");
     if (!sessions.length) { log(`${week.from}: no sessions.`); continue; }
     const commits = (await Promise.all(activeSources().map((s) => inContext({ sourceId: s.id }, () => collectCommitsBetween(week.from, week.to))))).flat().sort((a, b) => a.date.localeCompare(b.date));
-    const materials = limitImported(await listMaterials(pid, { from: week.from, to: week.to }), log);
+    const materials = limitImported(await listMaterials(pid, { from: week.from, to: week.to }), await attachedMaterials(pid), log);
     const agentMaterials = await materialsForAgent(materials);
     const existing = await listSuggestions(pid);
     const evidence = {
@@ -442,7 +444,7 @@ export async function draftStory(request: StoryRequest, log: Log, agent?: AgentK
   const namedMaterials = await getMaterials(pid, [...new Set([...request.materialIds, ...(retell?.materialIds ?? [])])]);
   const nearby = (await listMaterials(pid, { from, to })).sort((a, b) => distance(a) - distance(b));
   // Named materials stay; the limit applies to the nearby ones.
-  const materials = [...new Map([...namedMaterials, ...limitImported(nearby.filter((m) => !namedMaterials.some((n) => n.id === m.id)), log)].map((m) => [m.id, m])).values()];
+  const materials = [...new Map([...namedMaterials, ...limitImported(nearby.filter((m) => !namedMaterials.some((n) => n.id === m.id)), await attachedMaterials(pid), log)].map((m) => [m.id, m])).values()];
   const agentMaterials = await materialsForAgent(materials);
 
   const records = (await listRecords(pid)).filter((r) => r.visibility !== "excluded");

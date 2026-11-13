@@ -98,8 +98,11 @@ test("a progress check takes imported materials of its own days only, and a run 
   assert.deepEqual(progressMaterials([uploaded, old, recent], "2026-03-01").map((m) => m.id), ["up", "recent"], "an uploaded material counts whatever its date");
   const many = Array.from({ length: IMPORTED_PER_RUN + 3 }, (_, i) => ({ id: `m${i}`, date: "2026-03-02", origin }) as Material);
   const lines: string[] = [];
-  const kept = limitImported([uploaded, ...many], (l) => lines.push(l));
+  const kept = limitImported([uploaded, ...many], new Set(), (l) => lines.push(l));
   assert.deepEqual(kept.map((m) => m.id), ["up", ...many.slice(0, IMPORTED_PER_RUN).map((m) => m.id)]);
   assert.match(lines[0], /Left out 3 imported materials/);
-  assert.equal(limitImported([uploaded, recent]).length, 2);
+  assert.equal(limitImported([uploaded, recent], new Set()).length, 2);
+  const last = many.at(-1)!.id;
+  assert.ok(limitImported(many, new Set([last])).some((m) => m.id === last), "a material attached to a suggestion or a post is never left out");
+  assert.equal(limitImported(many, new Set([last])).length, IMPORTED_PER_RUN + 1);
 });
