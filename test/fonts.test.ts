@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { drawsLetters, GENERIC_FAMILIES, letterFamily } from "../server/render.js";
+import { drawsLetters, letterFamily } from "../server/render.js";
+import { FONT_STACKS } from "../video/renderer.js";
 
-test("every generic family that videos use draws letters on this machine", () => {
-  for (const family of GENERIC_FAMILIES) assert.ok(drawsLetters(family), `${family} draws no letters`);
+test("the font stacks of a video's text draw letters on this machine", () => {
+  for (const [name, stack] of Object.entries(FONT_STACKS)) assert.ok(drawsLetters(stack), `the ${name} stack draws no letters`);
 });
 
-test("a generic family without letters takes the first candidate that draws them", () => {
+test("a fallback family takes the first candidate that draws letters", () => {
   const draws = (font: string) => font !== "'Emoji'";
   assert.equal(letterFamily([undefined, "Emoji", "Sans", "Serif"], draws), "Sans");
   assert.equal(letterFamily(["Emoji"], draws), undefined);

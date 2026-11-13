@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, ImageData as CanvasImageData, loadImage, type Canvas } from "@napi-rs/canvas";
 import { CancelledError, currentJobSignal } from "./jobs.js";
 import { config } from "./config.js";
-import { outputSize, VideoFrameRenderer } from "../video/renderer.js";
+import { FALLBACK_FAMILIES, outputSize, VideoFrameRenderer } from "../video/renderer.js";
 import { audioSchedule, footageSeconds, segmentWindows, type ScheduledAudio, type SegmentWindow } from "../video/schedule.js";
 import type { Picture, Platform } from "../video/platform.js";
 import type { TimelineProps } from "../shared/types.js";
@@ -40,9 +40,6 @@ async function decodeWithFfmpeg(file: Buffer): Promise<Picture> {
   return { source: image as unknown as CanvasImageSource, width: image.width, height: image.height };
 }
 
-/** The generic CSS families that the renderer's font stacks end with. */
-export const GENERIC_FAMILIES = ["sans-serif", "system-ui", "cursive", "serif", "monospace"];
-
 /** True when the canvas draws visible Latin letters in this font. A colour emoji font, for example, draws none. */
 export function drawsLetters(font: string): boolean {
   const canvas = createCanvas(64, 32);
@@ -65,18 +62,19 @@ export const letterFamily = (candidates: Array<string | undefined>, draws: (font
   candidates.find((f): f is string => !!f && draws(`'${f}'`));
 
 /**
- * The canvas library resolves generic families by itself, not through fontconfig. When its choice draws no letters,
- * for example a colour emoji font on Linux, every text of a video comes out empty. Such a family then becomes an
- * alias of the system's choice for it, or of the first installed family that draws letters.
+ * The canvas library resolves generic families by itself, not through fontconfig, and an alias can't replace its
+ * choice for sans-serif. When that choice draws no letters, for example a colour emoji font on Linux, the renderer's
+ * fallback family for it becomes an alias of the system's font for the generic family, or of the first installed
+ * family that draws letters.
  */
-export function resolveGenericFamilies(families = GENERIC_FAMILIES, match = systemFamily) {
-  for (const generic of families) {
+export function registerFallbackFamilies(match = systemFamily) {
+  for (const [generic, fallback] of [["sans-serif", FALLBACK_FAMILIES.sans], ["cursive", FALLBACK_FAMILIES.cursive]] as const) {
     if (drawsLetters(generic)) continue;
     const target = letterFamily([match(generic), ...GlobalFonts.families.map((f) => f.family)]);
-    if (target) GlobalFonts.setAlias(target, generic);
+    if (target) GlobalFonts.setAlias(target, fallback);
   }
 }
-resolveGenericFamilies();
+registerFallbackFamilies();
 
 export const serverPlatform: Platform = {
   createCanvas: (w, h) => createCanvas(w, h) as unknown as HTMLCanvasElement,

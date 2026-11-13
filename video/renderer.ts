@@ -6,8 +6,15 @@ import { FADE_FRAMES, footageSeconds, segmentWindows, type SegmentWindow } from 
 
 /** Family of the theme's display font. */
 const DISPLAY_FAMILY = "DevlogDisplay";
-const DISPLAY = `${DISPLAY_FAMILY}, 'Segoe Print', 'Comic Sans MS', cursive`;
-const BODY = "'Segoe UI', Inter, system-ui, sans-serif";
+/**
+ * Families that the server registers only where the canvas draws no letters in a generic family, as on some Linux
+ * systems. A browser doesn't know them and skips them, so the preview keeps its fonts.
+ */
+export const FALLBACK_FAMILIES = { sans: "DevlogSans", cursive: "DevlogCursive" } as const;
+const DISPLAY = `${DISPLAY_FAMILY}, 'Segoe Print', 'Comic Sans MS', ${FALLBACK_FAMILIES.cursive}, cursive`;
+const BODY = `'Segoe UI', Inter, ${FALLBACK_FAMILIES.sans}, system-ui, sans-serif`;
+/** The font stacks of a video's text, without size and weight. */
+export const FONT_STACKS = { display: DISPLAY, body: BODY } as const;
 
 /** A link as people read it: without the protocol, "www." or a trailing slash. */
 export const displayLink = (url: string) => url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "");
