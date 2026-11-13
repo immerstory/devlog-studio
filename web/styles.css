@@ -509,6 +509,9 @@
   .row.align-end { align-items: flex-end; }
   .settings-subhead.first { margin-top: 0; padding-top: 0; border-top: 0; }
   .material-rules { display: flex; flex-direction: column; gap: 8px; }
+  .rule-preview { max-height: 60vh; overflow: auto; }
+  .rule-preview table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .rule-preview th, .rule-preview td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
   .material-rule { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
   .theme-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
   .theme-swatch { width: 28px; height: 28px; border-radius: 6px; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 20%, transparent); }

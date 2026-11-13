@@ -15,6 +15,7 @@ const KIND_LABEL: Record<string, string> = {
   sessionImages: "Importing screenshots",
   sourceMaterials: "Checking sources for materials",
   sourceFilesAdd: "Adding files from sources",
+  sourceMaterialsPreview: "Previewing material rules",
   intake: "Daily intake",
   feeds: "Proposing from feeds",
   links: "Checking links",

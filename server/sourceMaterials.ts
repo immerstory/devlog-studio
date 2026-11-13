@@ -5,7 +5,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { DEFAULT_METADATA_FILE, type MaterialRule, type Source } from "../shared/projects.js";
-import { normalizeGroup, ORIGIN_FIELDS, type InboxFile, type Material, type MaterialOrigin, type OriginField } from "../shared/types.js";
+import { normalizeGroup, ORIGIN_FIELDS, type DateFrom, type InboxFile, type Material, type MaterialOrigin, type OriginField, type PreviewFile, type PreviewState, type RulePreview } from "../shared/types.js";
 import { CACHE_DIR } from "./config.js";
 import { projectId } from "./context.js";
 import { query } from "./db.js";
@@ -179,9 +179,8 @@ export interface MatchedFile {
   ruleId: string;
   path: string;
   blob: string;
-  fields: Pick<Material, "date" | "title" | "annotation" | "tags" | "group">;
-  /** How the date was found. */
-  dateFrom: "metadata" | "commit" | "first-commit";
+  fields: InboxFile["fields"];
+  dateFrom: DateFrom;
 }
 
 export interface SourceMatch {
@@ -517,4 +516,39 @@ export function addInboxFiles(ids: string[], fields: Partial<InboxFile["fields"]
     }
     return added;
   });
+}
+
+/** Files the preview lists; the total counts all of them. */
+export const PREVIEW_LIMIT = 500;
+
+/** Matches rules against a saved source without importing anything. The rules may be unsaved. */
+export async function previewRules(sourceId: string, rules: MaterialRule[], log: (line: string) => void = () => {}): Promise<RulePreview> {
+  const pid = projectId();
+  const source = activeSources().find((s) => s.id === sourceId);
+  if (!source) throw Object.assign(new Error("Save the source first, then preview its rules."), { status: 400 });
+  const found = await matchSourceFiles({ ...source, materialRules: rules }, log);
+  const materials = new Map((await listMaterials(pid)).filter((m) => m.origin).map((m) => [fileKey(m.origin!.sourceId, m.origin!.path), m]));
+  const inbox = new Map((await listInboxFiles(pid)).map((f) => [fileKey(f.sourceId, f.path), f]));
+  const deleted = new Set((await getValue<string[]>(pid, DELETED_SOURCE_FILES)) ?? []);
+  const blobs = new Map<string, string>();
+  for (const m of materials.values()) blobs.set(m.origin!.blob, fileKey(m.origin!.sourceId, m.origin!.path));
+  for (const f of inbox.values()) if (!blobs.has(f.blob)) blobs.set(f.blob, fileKey(f.sourceId, f.path));
+  const matchesPerRule = Object.fromEntries(rules.map((r) => [r.id, 0]));
+  const toInbox = new Set(rules.filter((r) => r.importTo === "inbox").map((r) => r.id));
+  const files = found.files.map((file): PreviewFile => {
+    const key = fileKey(source.id, file.path);
+    matchesPerRule[file.ruleId]++;
+    const twin = blobs.get(file.blob);
+    const moves = !!twin && splitKey(twin).sourceId === source.id && !found.paths.has(splitKey(twin).path);
+    const state: PreviewState = deleted.has(key) ? "deleted"
+      : materials.has(key) ? "material"
+      : inbox.get(key)?.status === "dismissed" ? "dismissed"
+      : inbox.has(key) ? "inbox"
+      : twin && twin !== key ? (moves ? "moved" : "duplicate")
+      : toInbox.has(file.ruleId) ? "new-inbox" : "new";
+    if (!twin) blobs.set(file.blob, key);
+    return { path: file.path, ruleId: file.ruleId, fields: file.fields, dateFrom: file.dateFrom, state };
+  });
+  log(`${files.length} file(s) match.`);
+  return { total: files.length, files: files.slice(0, PREVIEW_LIMIT), matchesPerRule, errors: found.errors };
 }

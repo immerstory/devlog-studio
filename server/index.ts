@@ -3,7 +3,7 @@ import type { StoryRequest } from "../shared/types.js";
 import { videoOutput } from "./outputs/index.js";
 import { outputsWithSegment } from "../shared/outputs.js";
 import { sourceUsage, listProjects, loadProjects, getProject, createProject, saveProject, deleteProject, resumeDeletion, checkSource, listConnections, getConnection, saveConnection, deleteConnection, publicConnection } from "./projects.js";
-import type { ProjectSettings, YouTubeConnection } from "../shared/projects.js";
+import { readMaterialRules, type ProjectSettings, type YouTubeConnection } from "../shared/projects.js";
 import { projectId, inContext } from "./context.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -76,7 +76,7 @@ import { activityView, discoverSources, saveForgeToken, setManualLink, setVisibi
 import { captureOperation } from "./capture/provider.js";
 
 import { handleUpload, removeMaterial } from "./materials.js";
-import { addInboxFiles, importSourceMaterials, inboxFilePath, listInboxFiles, setInboxFileStatus, withEdits } from "./sourceMaterials.js";
+import { addInboxFiles, importSourceMaterials, inboxFilePath, listInboxFiles, previewRules, setInboxFileStatus, withEdits } from "./sourceMaterials.js";
 import { listFolders } from "./folders.js";
 import { contentTypeOf, serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
@@ -356,6 +356,11 @@ projectApi.post("/session-images/:id/material", h((req) => {
 
 projectApi.get("/source-files", h(() => listInboxFiles(projectId())));
 projectApi.post("/source-files/import", h(() => startJob("sourceMaterials", "project", (log) => importSourceMaterials(log))));
+/** Matches a saved source's rules, as edited and not yet saved, without importing. */
+projectApi.post("/source-files/preview", h((req) => {
+  const sourceId = String(req.body?.sourceId ?? "");
+  return startJob("sourceMaterialsPreview", `preview:${sourceId}`, (log) => previewRules(sourceId, readMaterialRules(req.body?.rules), log));
+}));
 projectApi.get("/source-files/:id/file", h(async (req, res) => {
   const { file, blob } = await inboxFilePath(param(req, "id"));
   // A blob never changes, and sendFile answers range requests, which video previews need.

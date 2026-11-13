@@ -178,6 +178,13 @@ export interface InboxFile {
   status: "inbox" | "dismissed";
 }
 
+/** How an imported file's date was found: from the metadata's date, from a commit it names, or from the file's first commit. */
+export type DateFrom = "metadata" | "commit" | "first-commit";
+/** What the import would do with a file: add it to the materials or the inbox, keep it there, update or move its material, or leave it out. */
+export type PreviewState = "new" | "new-inbox" | "inbox" | "material" | "moved" | "dismissed" | "deleted" | "duplicate";
+export interface PreviewFile { path: string; ruleId: string; fields: InboxFile["fields"]; dateFrom: DateFrom; state: PreviewState }
+export interface RulePreview { total: number; files: PreviewFile[]; matchesPerRule: Record<string, number>; errors: string[] }
+
 export interface MaterialDeletion { deleted: true; warning?: string }
 
 /** Trims a group name; an empty name means no group. */

@@ -126,7 +126,7 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
             </div>
             <label>Content globs<ListInput value={source.contentGlobs} onChange={(v) => edit((p) => { p.settings.sources[i].contentGlobs = v; })} /><span className="field-hint">{CONTENT_GLOBS_HINT}</span></label>
             <label>Feed files<ListInput value={source.feedGlobs ?? []} onChange={(v) => edit((p) => { if (v.length) p.settings.sources[i].feedGlobs = v; else delete p.settings.sources[i].feedGlobs; })} /><span className="field-hint">{FEED_GLOBS_HINT}</span></label>
-            <MaterialRulesField value={source.materialRules ?? []} onChange={(rules) => edit((p) => { if (rules.length) p.settings.sources[i].materialRules = rules; else delete p.settings.sources[i].materialRules; })} />
+            <MaterialRulesField sourceId={source.id} saved={!!savedSource(source.id) && !source.archived} value={source.materialRules ?? []} onChange={(rules) => edit((p) => { if (rules.length) p.settings.sources[i].materialRules = rules; else delete p.settings.sources[i].materialRules; })} />
             <div className="row">
               <label className="check"><input type="radio" name="primary-source" disabled={source.archived} checked={s.primarySourceId === source.id} onChange={() => edit((p) => { p.settings.primarySourceId = source.id; })} />Primary source</label>
               {source.archived ? <span className="muted small">Archived</span> : null}

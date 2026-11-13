@@ -234,6 +234,19 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal((await byPath()).get("inbox/a.png")!.title, "Mine");
           await assert.rejects(addInboxFiles([id("c")], {}, () => {}, io), /no longer in the inbox/);
 
+          const { previewRules } = await import("../server/sourceMaterials.js");
+          media.write("inbox/d.png", "d pixels");
+          media.commit("Add d");
+          const preview = await previewRules("media", [{ id: "rule-2", include: ["inbox/**"], importTo: "inbox" }, ...rules, { id: "rule-3", include: ["nothing/**"] }]);
+          assert.deepEqual(Object.fromEntries(preview.files.map((f) => [f.path, f.state])), {
+            "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.2/hut.png": "deleted", "releases/0.3/twin.png": "deleted",
+          }, "forest.png's folder has an invalid metadata file, so the preview leaves it out too");
+          assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 2, "rule-3": 0 });
+          assert.equal(preview.errors.length, 3, "the invalid metadata files and the Git LFS pointer are reported");
+          assert.equal((await listInboxFiles(project.id)).length, 1, "a preview changes nothing");
+          media.remove("inbox/d.png");
+          media.commit("Remove d");
+          await assert.rejects(previewRules("unsaved", rules), /Save the source first/);
           const { inboxFilePath } = await import("../server/sourceMaterials.js");
           assert.equal(fs.readFileSync((await inboxFilePath(id("b"))).file, "utf8"), "b pixels", "the inbox shows the committed file");
           const withRules = getProject(project.id).settings;
