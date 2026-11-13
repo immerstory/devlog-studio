@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { query, tx } from "./db.js";
 import { currentContext } from "./context.js";
-import { newId, notFound, projectWrite, validateReferences } from "./store.js";
+import { DELETED_SOURCE_FILES, newId, notFound, projectWrite, validateReferences } from "./store.js";
 import { exampleConfig, OUTPUT_DIR } from "./config.js";
 import { projectFromStudio } from "./project-model.js";
 import type pg from "pg";
@@ -159,6 +159,7 @@ async function removeSources(c: pg.PoolClient, pid: string, removed: Source[]) {
   const records = (await c.query("SELECT id FROM activity WHERE project_id = $1 AND data->>'sourceId' = ANY($2)", [pid, [...ids]])).rows.map((r: { id: string }) => r.id);
   const images = (await c.query("DELETE FROM session_images WHERE project_id = $1 AND data->>'sourceId' = ANY($2) RETURNING id", [pid, [...ids]])).rows.map((r: { id: string }) => r.id);
   await c.query("DELETE FROM source_files WHERE project_id = $1 AND data->>'sourceId' = ANY($2)", [pid, [...ids]]);
+  await c.query("UPDATE settings SET value = (SELECT coalesce(jsonb_agg(e), '[]'::jsonb) FROM jsonb_array_elements_text(value) e WHERE split_part(e, ':', 1) <> ALL($2)) WHERE key = $1", [`project:${pid}:${DELETED_SOURCE_FILES}`, [...ids]]);
   await c.query("DELETE FROM activity_links WHERE project_id = $1 AND (a = ANY($2) OR b = ANY($2))", [pid, records]);
   await c.query("DELETE FROM activity WHERE project_id = $1 AND id = ANY($2)", [pid, records]);
   for (const row of (await c.query("SELECT key, value FROM settings WHERE key = ANY($1) OR key LIKE $2", [[`project:${pid}:snapshot`, `project:${pid}:backfilledWeeks`], `project:${pid}:activityCursor:%`])).rows) {

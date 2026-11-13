@@ -308,7 +308,7 @@ The import only reads the source. It reads committed files only and doesn't chan
 - A file is stored again only when its content changes. A file with the same content as another imported file or inbox file is skipped. When that other file has left the same source, the file was moved or renamed, and its material moves with it.
 - When the metadata changes, the material changes with it. A title, annotation, date, tag list or group that you edit in the app stays as you edited it.
 - A material whose file leaves the source, or no longer matches a rule, stays and is marked as no longer in its source.
-- A material that you delete isn't imported again from its path.
+- A material that you delete isn't imported again from its path. To bring it back, open **Preview matches**, where the file is marked as deleted, and select **Import again**. The next import then adds it. A deleted file that leaves the source is forgotten, and so are the deleted files of a source that you delete.
 - Agents see imported materials like uploaded ones, with two limits, because a rule can import a large folder at once. A progress check uses an imported material only when its date falls in the days it checks. A progress check, a backfill week, a review with sessions or a post you describe sees at most 12 imported materials; the task log says how many it left out. Materials you attach to a suggestion or a post always count.
 
 On **Materials**, an imported material shows its source and path. **Origin** shows only the materials uploaded in the app, those of one source, or those whose file is no longer in its source. Search also finds a material by its path.

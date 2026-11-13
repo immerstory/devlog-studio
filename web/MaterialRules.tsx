@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ListInput } from "@/components/list-input";
 import { DEFAULT_METADATA_FILE, type MaterialRule } from "../shared/projects";
 import type { DateFrom, PreviewState, RulePreview } from "../shared/types";
-import { useJob } from "./api";
+import { api, useJob } from "./api";
 import { IMPORT_TO_HINT, LISTED_ONLY_HINT, MATERIAL_EXCLUDE_HINT, MATERIAL_INCLUDE_HINT, MATERIAL_PATTERN_HINT, MATERIAL_RULES_HINT, METADATA_FILE_HINT } from "./project-fields";
 
 const STATE_LABEL: Record<PreviewState, string> = {
@@ -20,8 +20,20 @@ const STATE_LABEL: Record<PreviewState, string> = {
 const DATE_LABEL: Record<DateFrom, string> = { metadata: "from the metadata", commit: "from the named commit", "first-commit": "from the first commit" };
 
 /** The files the rules match, with the fields they get and what the import would do. */
-function PreviewDialog({ preview, rules, onClose }: { preview: RulePreview; rules: MaterialRule[]; onClose: () => void }) {
+function PreviewDialog({ sourceId, preview, rules, onClose }: { sourceId: string; preview: RulePreview; rules: MaterialRule[]; onClose: () => void }) {
   const ruleName = (id: string) => `Rule ${rules.findIndex((r) => r.id === id) + 1}`;
+  const [again, setAgain] = useState<Set<string>>(new Set());
+  const [err, setErr] = useState("");
+  const deleted = preview.files.filter((f) => f.state === "deleted" && !again.has(f.path)).map((f) => f.path);
+  const importAgain = async (paths: string[]) => {
+    setErr("");
+    try {
+      await api("/api/source-files/import-again", "POST", { sourceId, paths });
+      setAgain((done) => new Set([...done, ...paths]));
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogContent className="sm:max-w-5xl">
@@ -33,6 +45,13 @@ function PreviewDialog({ preview, rules, onClose }: { preview: RulePreview; rule
           </DialogDescription>
         </DialogHeader>
         {preview.errors.map((e) => <div key={e} className="error small">{e}</div>)}
+        {err ? <div className="error small">{err}</div> : null}
+        {deleted.length || again.size ? (
+          <div className="row">
+            <span className="muted small grow">{again.size ? `${again.size} deleted file${again.size === 1 ? "" : "s"} will be imported again by the next Refresh activity or Check sources.` : "Files whose material you deleted stay out until you import them again."}</span>
+            {deleted.length > 1 ? <Button size="xs" variant="outline" onClick={() => void importAgain(deleted)}>Import all {deleted.length} deleted files again</Button> : null}
+          </div>
+        ) : null}
         <div className="rule-preview">
           <table>
             <thead><tr><th>File</th><th>Title</th><th>Tags</th><th>Group</th><th>Date</th><th>Import</th></tr></thead>
@@ -44,7 +63,10 @@ function PreviewDialog({ preview, rules, onClose }: { preview: RulePreview; rule
                   <td>{f.fields.tags.join(", ")}</td>
                   <td>{f.fields.group ?? ""}</td>
                   <td title={DATE_LABEL[f.dateFrom]}>{f.fields.date}</td>
-                  <td>{STATE_LABEL[f.state]}</td>
+                  <td>
+                    {again.has(f.path) ? "Imported again on the next import" : STATE_LABEL[f.state]}
+                    {f.state === "deleted" && !again.has(f.path) ? <> <Button size="xs" variant="ghost" onClick={() => void importAgain([f.path])}>Import again</Button></> : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -78,7 +100,7 @@ export function MaterialRulesField({ sourceId, saved, value, onChange }: { sourc
       </div>
       <span className="field-hint">{MATERIAL_RULES_HINT}</span>
       {err ? <div className="error small">{err}</div> : null}
-      {preview ? <PreviewDialog preview={preview} rules={value} onClose={() => setPreview(null)} /> : null}
+      {preview ? <PreviewDialog sourceId={sourceId} preview={preview} rules={value} onClose={() => setPreview(null)} /> : null}
       {value.map((rule, i) => (
         <fieldset key={rule.id} className="material-rule">
           <label>Include<ListInput value={rule.include} onChange={(include) => change(i, { include })} /><span className="field-hint">{MATERIAL_INCLUDE_HINT}</span></label>

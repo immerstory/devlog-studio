@@ -14,7 +14,7 @@ import { localDate } from "./ingress/provider.js";
 import { throwIfCancelled } from "./jobs.js";
 import { DELETED_SOURCE_FILES, ingestFile, isMediaFile, isVideoFile, type IngestOptions, type MaterialFields } from "./materials.js";
 import { deletePrefix } from "./storage.js";
-import { getValue, listMaterials, newId, updateMaterial } from "./store.js";
+import { getValue, listMaterials, newId, updateMaterial, updateValue } from "./store.js";
 
 const run = promisify(execFile);
 const git = async (cwd: string, args: string[]) => (await run("git", [...READ_ONLY, ...args], { cwd, maxBuffer: 64 * 1024 * 1024, windowsHide: true })).stdout;
@@ -196,8 +196,9 @@ export interface SourceMatch {
 export async function matchSourceFiles(source: Source, log: (line: string) => void = () => {}): Promise<SourceMatch> {
   const rules = source.materialRules ?? [];
   const errors: string[] = [];
-  if (!rules.some((r) => r.include.length)) return { files: [], paths: new Set(), held: [], errors };
+  // The paths are read even without rules: they tell which deleted and dismissed files are still in the source.
   const tree = await committedFiles(source);
+  if (!rules.some((r) => r.include.length)) return { files: [], paths: new Set(tree.keys()), held: [], errors };
   // A metadata file per folder: undefined when there is none, null when it is invalid, which skips the folder.
   const metadata = new Map<string, FolderMetadata | null | undefined>();
   const readMetadata = async (rule: MaterialRule, folder: string): Promise<FolderMetadata | null | undefined> => {
@@ -465,6 +466,12 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
       const marked = await updateMaterial(pid, m.id, (current) => (current?.origin && !current.origin.removed && current.origin.path === m.origin!.path ? { ...current, origin: { ...current.origin, removed: true } } : undefined));
       if (marked) result.removed++;
     }
+    // The deleted list keeps only files still in the source, so it doesn't grow without end.
+    const gone = [...deleted].filter((key) => splitKey(key).sourceId === source.id && !match.paths.has(splitKey(key).path));
+    if (gone.length) {
+      await updateValue<string[]>(pid, DELETED_SOURCE_FILES, (list = []) => list.filter((key) => !gone.includes(key)));
+      for (const key of gone) deleted.delete(key);
+    }
     // A waiting file leaves the inbox when it no longer matches; a dismissed one only when it leaves the source.
     for (const f of [...inbox.values()].filter((x) => x.sourceId === source.id && !seen.has(fileKey(source.id, x.path)))) {
       if (f.status === "dismissed" && match.paths.has(f.path)) continue;
@@ -569,4 +576,12 @@ export async function previewRules(sourceId: string, rules: MaterialRule[], log:
   });
   log(`${files.length} file(s) match.`);
   return { total: files.length, files: files.slice(0, PREVIEW_LIMIT), matchesPerRule, errors: found.errors };
+}
+
+/** Lets the next import bring back deleted files of a source. Returns how many were on the deleted list. */
+export async function importAgain(sourceId: string, paths: string[]): Promise<number> {
+  const keys = new Set(paths.map((p) => fileKey(sourceId, p)));
+  let found = 0;
+  await updateValue<string[]>(projectId(), DELETED_SOURCE_FILES, (list = []) => list.filter((key) => !(keys.has(key) && ++found)));
+  return found;
 }

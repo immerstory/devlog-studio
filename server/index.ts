@@ -76,7 +76,7 @@ import { activityView, discoverSources, saveForgeToken, setManualLink, setVisibi
 import { captureOperation } from "./capture/provider.js";
 
 import { handleUpload, removeMaterial } from "./materials.js";
-import { addInboxFiles, importSourceMaterials, inboxFilePath, listInboxFiles, previewRules, setInboxFileStatus, withEdits } from "./sourceMaterials.js";
+import { addInboxFiles, importAgain, importSourceMaterials, inboxFilePath, listInboxFiles, previewRules, setInboxFileStatus, withEdits } from "./sourceMaterials.js";
 import { listFolders } from "./folders.js";
 import { contentTypeOf, serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
@@ -356,6 +356,12 @@ projectApi.post("/session-images/:id/material", h((req) => {
 
 projectApi.get("/source-files", h(() => listInboxFiles(projectId())));
 projectApi.post("/source-files/import", h(() => startJob("sourceMaterials", "project", (log) => importSourceMaterials(log))));
+/** Takes deleted files of a source off the deleted list, so the next import brings them back. */
+projectApi.post("/source-files/import-again", h(async (req) => {
+  const paths = (Array.isArray(req.body?.paths) ? req.body.paths : []).filter((x: unknown): x is string => typeof x === "string");
+  if (!paths.length) throw bad("Choose files to import again");
+  return { count: await importAgain(String(req.body?.sourceId ?? ""), paths) };
+}));
 /** Matches a saved source's rules, as edited and not yet saved, without importing. */
 projectApi.post("/source-files/preview", h((req) => {
   const sourceId = String(req.body?.sourceId ?? "");

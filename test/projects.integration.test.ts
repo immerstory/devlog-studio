@@ -193,6 +193,12 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal((await importSourceMaterials(() => {}, deleting)).updated, 0, "a material deleted while its new version is stored stays deleted");
           assert.equal((await byPath()).has("releases/0.3/twin.png"), false);
           assert.deepEqual(removed, [`materials/${lakeBefore.id}/${execFileSync("git", ["rev-parse", "HEAD:releases/0.3/twin.png"], { cwd: media.dir }).toString().trim().slice(0, 12)}/`], "and the new version's files are removed");
+          const deletedPaths = async () => ((await store.getValue<string[]>(project.id, store.DELETED_SOURCE_FILES)) ?? []).sort();
+          assert.ok((await deletedPaths()).includes("media:releases/0.2/hut.png"));
+          media.remove("releases/0.2/hut.png");
+          media.commit("Remove hut");
+          await importSourceMaterials(() => {}, io);
+          assert.ok(!(await deletedPaths()).includes("media:releases/0.2/hut.png"), "a deleted file that left the source leaves the deleted list");
 
           fs.mkdirSync(path.join(media.dir, "releases/0.4"));
           fs.renameSync(path.join(media.dir, "releases/0.3/forest.png"), path.join(media.dir, "releases/0.4/forest.png"));
@@ -212,6 +218,7 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           await saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [] } : x)) });
           assert.equal(getProject(project.id).settings.sources.find((x) => x.id === "media")!.materialRules, undefined, "an empty rule list is removed");
           assert.equal((await importSourceMaterials(() => {}, io)).removed, 1, "without rules, the source's materials no longer match a rule");
+          assert.ok((await deletedPaths()).includes("media:releases/0.3/twin.png"), "a source without rules keeps the deleted files that are still in it");
           assert.equal((await byPath()).get("releases/0.4/forest.png")!.origin!.removed, true, "a material that no longer matches a rule stays");
           await assert.rejects(saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "r", include: ["a"] }, { id: "r", include: ["b"] }] } : x)) }), /unique IDs/);
           const { addInboxFiles, inboxFileId, listInboxFiles, setInboxFileStatus } = await import("../server/sourceMaterials.js");
@@ -243,9 +250,9 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           media.commit("Add d");
           const preview = await previewRules("media", [{ id: "rule-2", include: ["inbox/**"], importTo: "inbox" }, ...rules, { id: "rule-3", include: ["nothing/**"] }]);
           assert.deepEqual(Object.fromEntries(preview.files.map((f) => [f.path, f.state])), {
-            "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.2/hut.png": "deleted", "releases/0.3/twin.png": "deleted",
+            "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.3/twin.png": "deleted",
           }, "forest.png's folder has an invalid metadata file, so the preview leaves it out too");
-          assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 2, "rule-3": 0 });
+          assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 1, "rule-3": 0 });
           assert.equal(preview.errors.length, 3, "the invalid metadata files and the Git LFS pointer are reported");
           assert.equal((await listInboxFiles(project.id)).length, 1, "a preview changes nothing");
           media.remove("inbox/d.png");
@@ -272,6 +279,14 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           await Promise.all(left.map((m) => removeMaterial(m.id, async () => {})));
           const deletedList = (await store.getValue<string[]>(project.id, store.DELETED_SOURCE_FILES)) ?? [];
           assert.ok(left.every((m) => deletedList.includes(`media:${m.origin!.path}`)), "deletions at the same moment all reach the deleted list");
+
+          const { importAgain } = await import("../server/sourceMaterials.js");
+          assert.equal(await importAgain("media", ["releases/0.3/twin.png", "nothing.png"]), 1, "only listed files count");
+          assert.ok(!(await deletedPaths()).includes("media:releases/0.3/twin.png"), "a file imported again leaves the deleted list");
+          assert.equal(await importAgain("media", ["releases/0.3/twin.png"]), 0);
+          const withMedia = getProject(project.id).settings;
+          await saveProject(project.id, { ...withMedia, sources: withMedia.sources.filter((x) => x.id !== "media") });
+          assert.deepEqual((await deletedPaths()).filter((k) => k.startsWith("media:")), [], "deleting a source clears its deleted files");
         });
       } finally {
         await deleteProject(project.id, false);
