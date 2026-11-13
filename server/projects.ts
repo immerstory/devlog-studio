@@ -8,7 +8,7 @@ import { newId, notFound, projectWrite, validateReferences } from "./store.js";
 import { exampleConfig, OUTPUT_DIR } from "./config.js";
 import { projectFromStudio } from "./project-model.js";
 import type pg from "pg";
-import type { Project, ProjectSettings, Source, YouTubeConnection } from "../shared/projects.js";
+import { readMaterialRules, type Project, type ProjectSettings, type Source, type YouTubeConnection } from "../shared/projects.js";
 import type { EgressConnection } from "../shared/publications.js";
 import { listJobs } from "./jobs.js";
 import { deleteKey, deletePrefix, listKeys } from "./storage.js";
@@ -114,6 +114,12 @@ export async function saveProject(id: string, settings: ProjectSettings, slug = 
   const removedSources = old.settings.sources.filter((s) => !settings.sources.some((n) => n.id === s.id));
   if (new Set(settings.sources.map((s) => s.id)).size !== settings.sources.length || new Set(settings.captureTargets.map((t) => t.id)).size !== settings.captureTargets.length) throw new Error("Sources and capture targets need unique IDs");
   for (const source of settings.sources.filter((s) => !s.archived && old.settings.sources.find((o) => o.id === s.id)?.path !== s.path)) await checkSource(source.path);
+  for (const source of settings.sources) {
+    const rules = readMaterialRules(source.materialRules);
+    if (new Set(rules.map((r) => r.id)).size !== rules.length) throw new Error("Material rules need unique IDs");
+    if (rules.length) source.materialRules = rules;
+    else delete source.materialRules;
+  }
   const p = { ...old, settings, slug };
   let removedImages: string[] = [];
   await projectWrite(id, async (c) => {

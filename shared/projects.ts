@@ -9,7 +9,37 @@ export interface Source {
   contentGlobs: string[];
   /** Files read for their text, such as a daily news brief. Commits that change only these files leave the commit evidence. */
   feedGlobs?: string[];
+  /** Rules that import committed images and videos as materials. The first rule that matches a file applies. */
+  materialRules?: MaterialRule[];
   archived?: boolean;
+}
+/** Which committed files of a source become materials, and where their titles, tags and dates come from. */
+export interface MaterialRule {
+  id: string;
+  /** Globs of the images and videos to import, such as *.png or shots/v1/*.webp. A glob without a slash matches the file name in any folder. */
+  include: string[];
+  exclude?: string[];
+  /** Placeholders that take values from the path, such as {release}/{name}.{ext}. {name} gives the title, {group} the group, and the others give tags; {ext} and names that start with _ give nothing. */
+  pattern?: string;
+  /** Name of the JSON file in each folder that describes the folder and its files. Absent means DEFAULT_METADATA_FILE; empty reads none. */
+  metadataFile?: string;
+  /** Imports only files that the folder's metadata file lists. */
+  listedOnly?: boolean;
+}
+export const DEFAULT_METADATA_FILE = "materials.json";
+
+/** Keeps only valid material rules and their known fields, from settings or a request. */
+export function readMaterialRules(input: unknown): MaterialRule[] {
+  if (!Array.isArray(input)) return [];
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()) : []);
+  return input.filter((r): r is Record<string, unknown> => !!r && typeof r === "object" && typeof (r as { id?: unknown }).id === "string").map((r) => ({
+    id: r.id as string,
+    include: strings(r.include),
+    ...(strings(r.exclude).length ? { exclude: strings(r.exclude) } : {}),
+    ...(typeof r.pattern === "string" && r.pattern.trim() ? { pattern: r.pattern.trim() } : {}),
+    ...(typeof r.metadataFile === "string" ? { metadataFile: r.metadataFile.trim() } : {}),
+    ...(r.listedOnly === true ? { listedOnly: true } : {}),
+  }));
 }
 export type FeedTopics = "briefing" | "story";
 export type UnityTargetConfig = StudioConfig["unity"]["mcp"] & { projectPath: string };

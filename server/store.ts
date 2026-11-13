@@ -126,6 +126,18 @@ export async function listMaterials(pid: string, range?: { from?: string; to?: s
 }
 export const getMaterials = (pid: string, ids: string[]) => records<Material>(pid, "materials", ids);
 export const saveMaterial = (pid: string, m: Material) => projectWrite(pid, (c) => write(c, pid, "materials", entity(m)));
+/**
+ * Changes one material under the project's lock, so a change made meanwhile isn't lost. `fn` gets the stored material,
+ * or undefined when it no longer exists, and returns what to store, or undefined to store nothing.
+ */
+export async function updateMaterial(pid: string, id: string, fn: (m: Material | undefined) => Material | undefined): Promise<Material | undefined> {
+  return projectWrite(pid, async (c) => {
+    const current = (await c.query<{ data: Material }>("SELECT data FROM materials WHERE id = $1 AND project_id = $2 FOR UPDATE", [id, pid])).rows[0]?.data;
+    const next = fn(current);
+    if (next) await write(c, pid, "materials", entity(next));
+    return next;
+  });
+}
 /** Detach all uses and delete the row under the same project lock as reference writes. */
 export async function deleteMaterial(pid: string, id: string, removeFiles?: () => Promise<void>): Promise<MaterialDeletion> {
   const updated = await projectWrite(pid, async (c) => {

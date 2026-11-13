@@ -7,7 +7,7 @@ import Busboy from "busboy";
 import type { Request } from "express";
 import { CACHE_DIR } from "./config.js";
 import { cached, contentTypeOf, deletePrefix, putFile } from "./storage.js";
-import { deleteMaterial, getMaterials, newId, saveMaterial, today } from "./store.js";
+import { deleteMaterial, getMaterials, getValue, newId, saveMaterial, setValue, today } from "./store.js";
 import { normalizeGroup } from "../shared/types.js";
 import type { Material } from "../shared/types.js";
 
@@ -58,13 +58,23 @@ export async function withClip(m: Material): Promise<Material> {
   }
 }
 
+export const isMediaFile = (fileName: string) => IMAGE.test(fileName) || VIDEO.test(fileName);
+
+export type MaterialFields = Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group" | "generated" | "origin">>;
+/**
+ * Where a new file is stored. `id` and `createdAt` keep an existing material. `version` names a folder of its own for the
+ * files, because the local cache can't tell a replaced object of the same size from the old one.
+ */
+export interface IngestOptions { id?: string; createdAt?: string; version?: string; /** False leaves storing the record to the caller. */ save?: boolean }
+
 /** Stores an uploaded file as a material: original, thumbnail and preview go to Garage. */
-export async function ingestFile(file: string, fileName: string, fields: Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group" | "generated">>): Promise<Material> {
+export async function ingestFile(file: string, fileName: string, fields: MaterialFields, options: IngestOptions = {}): Promise<Material> {
   const video = VIDEO.test(fileName);
   if (!video && !IMAGE.test(fileName)) throw Object.assign(new Error(`Unsupported file type: ${fileName}`), { status: 400 });
-  const id = newId("mat");
+  const id = options.id ?? newId("mat");
+  const folder = `materials/${id}/${options.version ? `${options.version}/` : ""}`;
   const info = await probe(file);
-  const dir = path.join(CACHE_DIR, "uploads", id);
+  const dir = path.join(CACHE_DIR, "uploads", `${id}-${options.version ?? "upload"}`);
   fs.mkdirSync(dir, { recursive: true });
   const thumb = path.join(dir, "thumb.jpg");
   const preview = path.join(dir, "preview.jpg");
@@ -75,28 +85,29 @@ export async function ingestFile(file: string, fileName: string, fields: Partial
   const safeName = fileName.replace(/[^\w.\- ]+/g, "_");
   const m: Material = {
     id,
-    createdAt: new Date().toISOString(),
+    createdAt: options.createdAt ?? new Date().toISOString(),
     date: fields.date && /^\d{4}-\d{2}-\d{2}$/.test(fields.date) ? fields.date : today(),
     kind: video ? "video" : "image",
     fileName,
     contentType: contentTypeOf(fileName),
     size: fs.statSync(file).size,
-    key: `materials/${id}/${safeName}`,
-    thumbKey: `materials/${id}/thumb.jpg`,
-    previewKey: `materials/${id}/preview.jpg`,
-    ...(clip ? { clipKey: `materials/${id}/clip.mp4` } : {}),
+    key: `${folder}${safeName}`,
+    thumbKey: `${folder}thumb.jpg`,
+    previewKey: `${folder}preview.jpg`,
+    ...(clip ? { clipKey: `${folder}clip.mp4` } : {}),
     ...info,
     title: fields.title?.trim() || path.basename(fileName, path.extname(fileName)),
     annotation: fields.annotation?.trim() ?? "",
     tags: fields.tags ?? [],
     group: normalizeGroup(fields.group),
     ...(fields.generated ? { generated: fields.generated } : {}),
+    ...(fields.origin ? { origin: fields.origin } : {}),
   };
   await putFile(m.key, file);
   await putFile(m.thumbKey, thumb);
   await putFile(m.previewKey, preview);
   if (clip && m.clipKey) await putFile(m.clipKey, clip);
-  await saveMaterial(projectId(), m);
+  if (options.save !== false) await saveMaterial(projectId(), m);
   fs.rmSync(dir, { recursive: true, force: true });
   return m;
 }
@@ -171,8 +182,18 @@ export function receiveSingleFile(req: Request): Promise<{ path: string; name: s
   });
 }
 
+/** Files of sources whose materials the developer deleted, as "sourceId:path". The import leaves them out. */
+export const DELETED_SOURCE_FILES = "sourceMaterials:deleted";
+
 export async function removeMaterial(id: string, removeFiles = deletePrefix) {
-  return deleteMaterial(projectId(), id, () => removeFiles(`materials/${id}/`));
+  const pid = projectId();
+  const [m] = await getMaterials(pid, [id]);
+  const result = await deleteMaterial(pid, id, () => removeFiles(`materials/${id}/`));
+  if (m?.origin) {
+    const deleted = new Set((await getValue<string[]>(pid, DELETED_SOURCE_FILES)) ?? []);
+    await setValue(pid, DELETED_SOURCE_FILES, [...deleted.add(`${m.origin.sourceId}:${m.origin.path}`)]);
+  }
+  return result;
 }
 
 

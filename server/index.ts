@@ -13,7 +13,6 @@ import { config, saveConfig, loadConfig, globalConfig, saveGlobal, publicConfig,
 import { migrate } from "./db.js";
 import {
   deleteNote,
-  getMaterials,
   getSuggestions,
   getSnapshot,
   insertNote,
@@ -24,7 +23,7 @@ import {
   listSuggestions,
   loadPost,
   newId,
-  saveMaterial,
+  updateMaterial,
   saveScript,
   today,
   updatePost,
@@ -76,6 +75,7 @@ import { activityView, discoverSources, saveForgeToken, setManualLink, setVisibi
 import { captureOperation } from "./capture/provider.js";
 
 import { handleUpload, removeMaterial } from "./materials.js";
+import { withEdits } from "./sourceMaterials.js";
 import { listFolders } from "./folders.js";
 import { serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
@@ -300,26 +300,24 @@ projectApi.post(
     const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).filter((x: unknown): x is string => typeof x === "string");
     if (!ids.length) throw bad("Select materials to group");
     const group = normalizeGroup(req.body.group);
-    const items = await getMaterials(projectId(), ids);
-    for (const m of items) await saveMaterial(projectId(), { ...m, group });
-    return items.length;
+    let count = 0;
+    for (const id of ids) if (await updateMaterial(projectId(), id, (m) => (m ? withEdits(m, { ...m, group }) : undefined))) count++;
+    return count;
   }),
 );
 projectApi.patch(
   "/materials/:id",
   h(async (req) => {
-    const [m] = await getMaterials(projectId(), [param(req, "id")]);
-    if (!m) throw Object.assign(new Error("Material not found"), { status: 404 });
     const b = req.body as Partial<Material>;
-    const next: Material = {
+    const next = await updateMaterial(projectId(), param(req, "id"), (m) => m && withEdits(m, {
       ...m,
       date: isDate(b.date) ? b.date : m.date,
       title: typeof b.title === "string" ? b.title : m.title,
       annotation: typeof b.annotation === "string" ? b.annotation : m.annotation,
-      tags: Array.isArray(b.tags) ? b.tags : m.tags,
+      tags: Array.isArray(b.tags) ? b.tags.filter((t): t is string => typeof t === "string") : m.tags,
       group: "group" in b ? normalizeGroup(b.group) : m.group,
-    };
-    await saveMaterial(projectId(), next);
+    }));
+    if (!next) throw Object.assign(new Error("Material not found"), { status: 404 });
     return next;
   }),
 );

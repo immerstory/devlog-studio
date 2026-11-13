@@ -98,6 +98,124 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
         fs.rmSync(repo, { recursive: true, force: true });
       }
     }
+    {
+      const { execFileSync } = await import("node:child_process");
+      const os = await import("node:os");
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "devlog-media-"));
+      const repo = (name: string) => {
+        const dir = path.join(root, name);
+        fs.mkdirSync(dir);
+        const sh = (args: string[], env: Record<string, string> = {}) => execFileSync("git", args, { cwd: dir, env: { ...process.env, ...env }, windowsHide: true }).toString().trim();
+        sh(["init", "-q"]); sh(["config", "user.email", "test@example.com"]); sh(["config", "user.name", "Test"]);
+        const commit = (message: string, date = "2026-11-01T12:00:00+00:00") => { sh(["add", "-A"]); sh(["commit", "-q", "-m", message], { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date }); return sh(["rev-parse", "HEAD"]); };
+        const write = (file: string, body: string | object) => { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), typeof body === "string" ? body : JSON.stringify(body)); };
+        return { dir, commit, write, remove: (file: string) => fs.rmSync(path.join(dir, file)) };
+      };
+      const game = repo("game");
+      game.write("src/main.txt", "v1");
+      const build = game.commit("Build 0.3", "2026-03-05T10:00:00+00:00").slice(0, 7);
+      const media = repo("media");
+      media.write("releases/0.3/forest.png", "forest pixels");
+      media.write("releases/0.3/lake.png", "lake pixels");
+      media.write("releases/0.3/twin.png", "lake pixels");
+      media.write("releases/0.3/drafts/sketch.png", "sketch pixels");
+      media.write("releases/0.3/old.png", "old pixels");
+      media.write("releases/0.3/materials.json", { folder: { commit: build, tags: ["release"] }, files: { "forest.png": { title: "Forest at dawn", annotation: "New light." }, "old.png": { exclude: true } } });
+      media.write("releases/0.2/hut.png", "hut pixels");
+      media.write("releases/broken/a.png", "a pixels");
+      media.write("releases/broken/materials.json", "{");
+      media.write("scratch/test.png", "test pixels");
+      media.write("releases/0.3/large.png", "version https://git-lfs.github.com/spec/v1\noid sha256:0123\nsize 99999\n");
+      media.commit("Add sets");
+      const project = await createProject({ name: "Media", archetype: "game", sourcePath: game.dir });
+      const removed: string[] = [];
+      try {
+        const rules = [{ id: "rule-1", include: ["releases/**"], exclude: ["**/drafts/**"], pattern: "releases/{release}/{name}.{ext}" }];
+        await saveProject(project.id, { ...project.settings, sources: [...project.settings.sources, { id: "media", label: "Media", path: media.dir, contentGlobs: [], materialRules: rules }] });
+        await inContext({ projectId: project.id }, async () => {
+          const { importSourceMaterials } = await import("../server/sourceMaterials.js");
+          const { removeMaterial } = await import("../server/materials.js");
+          type Io = import("../server/sourceMaterials.js").ImportIO;
+          const ingest: Io["ingest"] = async (file, fileName, fields, options) => {
+            const id = options.id ?? store.newId("mat");
+            const folder = `materials/${id}/${options.version}/`;
+            const m = { id, createdAt: options.createdAt ?? new Date().toISOString(), date: fields.date!, kind: "image" as const, fileName, contentType: "image/png", size: fs.statSync(file).size, key: `${folder}${fileName}`, thumbKey: `${folder}thumb.jpg`, previewKey: `${folder}preview.jpg`, title: fields.title!, annotation: fields.annotation ?? "", tags: fields.tags ?? [], group: fields.group, origin: fields.origin };
+            if (options.save !== false) await store.saveMaterial(project.id, m);
+            return m;
+          };
+          const io: Io = { ingest, removeFiles: async (prefix) => { removed.push(prefix); } };
+          const byPath = async () => new Map((await store.listMaterials(project.id)).map((m) => [m.origin?.path, m]));
+
+          const [first, parallel] = await Promise.all([importSourceMaterials(() => {}, io), importSourceMaterials(() => {}, io)]);
+          assert.deepEqual([first.added, first.skipped], [3, 1], "forest, lake and hut; old.png is excluded, sketch.png is a draft, a.png's folder is invalid, and twin.png has the content of lake.png, which comes first");
+          assert.equal(parallel.added, 0, "a second import waits for the first, so nothing is stored twice");
+          assert.equal(first.errors.length, 2);
+          assert.match(first.errors[0], /releases\/broken\/materials\.json not valid JSON/);
+          assert.match(first.errors[1], /1 matched file is a Git LFS pointer, such as releases\/0\.3\/large\.png/);
+          let materials = await byPath();
+          assert.deepEqual([...materials.keys()].sort(), ["releases/0.2/hut.png", "releases/0.3/forest.png", "releases/0.3/lake.png"]);
+          const forest = materials.get("releases/0.3/forest.png")!;
+          const hutBefore = materials.get("releases/0.2/hut.png")!;
+          const lakeBefore = materials.get("releases/0.3/lake.png")!;
+          assert.deepEqual([forest.title, forest.annotation, forest.tags, forest.date], ["Forest at dawn", "New light.", ["0.3", "release"], "2026-03-05"], "the build commit in the game source dates the folder");
+          assert.equal(materials.get("releases/0.2/hut.png")!.date, "2026-11-01", "without metadata, the first commit dates the file");
+          assert.equal(materials.get("releases/0.3/lake.png")!.title, "lake");
+
+          assert.deepEqual(await importSourceMaterials(() => {}, io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, errors: first.errors }, "unchanged files aren't stored again");
+
+          await store.saveMaterial(project.id, (await import("../server/sourceMaterials.js")).withEdits(forest, { ...forest, title: "My title" }));
+          media.write("releases/0.3/materials.json", { folder: { commit: build, tags: ["release"] }, files: { "forest.png": { title: "Forest at night", annotation: "Night light." }, "old.png": { exclude: true } } });
+          media.write("releases/0.2/hut.png", "new hut pixels");
+          media.remove("releases/0.3/lake.png");
+          media.commit("Update sets");
+          const second = await importSourceMaterials(() => {}, io);
+          assert.deepEqual([second.added, second.updated, second.moved, second.removed, second.skipped], [0, 2, 1, 0, 0], "forest and hut change; lake.png is gone and twin.png has its content, so lake's material moves there");
+          materials = await byPath();
+          const after = materials.get("releases/0.3/forest.png")!;
+          assert.deepEqual([after.title, after.annotation], ["My title", "Night light."], "an edited title stays, the annotation follows the metadata");
+          const hut = materials.get("releases/0.2/hut.png")!;
+          assert.equal(hut.id, hutBefore.id, "a changed file keeps its material");
+          assert.equal(hut.key, `materials/${hut.id}/${hut.origin!.blob.slice(0, 12)}/hut.png`, "and is stored under its new blob");
+          assert.deepEqual(removed, [`materials/${hut.id}/${hutBefore.origin!.blob.slice(0, 12)}/`], "the old version's files are removed");
+          assert.equal(materials.get("releases/0.3/twin.png")!.id, lakeBefore.id);
+
+          await removeMaterial(hut.id, async () => {});
+          assert.equal((await importSourceMaterials(() => {}, io)).added, 0, "a deleted material isn't imported again");
+
+          media.write("releases/0.3/twin.png", "new twin pixels");
+          media.commit("Change twin");
+          removed.length = 0;
+          const deleting: Io = { ...io, ingest: async (file, fileName, fields, options) => { await removeMaterial(lakeBefore.id, async () => {}); return ingest(file, fileName, fields, options); } };
+          assert.equal((await importSourceMaterials(() => {}, deleting)).updated, 0, "a material deleted while its new version is stored stays deleted");
+          assert.equal((await byPath()).has("releases/0.3/twin.png"), false);
+          assert.deepEqual(removed, [`materials/${lakeBefore.id}/${execFileSync("git", ["rev-parse", "HEAD:releases/0.3/twin.png"], { cwd: media.dir }).toString().trim().slice(0, 12)}/`], "and the new version's files are removed");
+
+          fs.mkdirSync(path.join(media.dir, "releases/0.4"));
+          fs.renameSync(path.join(media.dir, "releases/0.3/forest.png"), path.join(media.dir, "releases/0.4/forest.png"));
+          media.commit("Move forest");
+          const move = await importSourceMaterials(() => {}, io);
+          assert.deepEqual([move.moved, move.added, move.removed], [1, 0, 0], "a moved file keeps its material");
+          const movedForest = (await byPath()).get("releases/0.4/forest.png")!;
+          assert.deepEqual([movedForest.id, movedForest.title, movedForest.tags], [forest.id, "My title", ["0.4"]], "the new path's values apply, and edits stay");
+
+          media.write("releases/0.4/materials.json", "{");
+          media.commit("Break metadata");
+          const broken = await importSourceMaterials(() => {}, io);
+          assert.equal(broken.removed, 0, "an invalid metadata file leaves its folder's materials as they are");
+          assert.equal((await byPath()).get("releases/0.4/forest.png")!.origin!.removed, undefined);
+
+          const current = getProject(project.id).settings;
+          await saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [] } : x)) });
+          assert.equal(getProject(project.id).settings.sources.find((x) => x.id === "media")!.materialRules, undefined, "an empty rule list is removed");
+          assert.equal((await importSourceMaterials(() => {}, io)).removed, 1, "without rules, the source's materials no longer match a rule");
+          assert.equal((await byPath()).get("releases/0.4/forest.png")!.origin!.removed, true, "a material that no longer matches a rule stays");
+          await assert.rejects(saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "r", include: ["a"] }, { id: "r", include: ["b"] }] } : x)) }), /unique IDs/);
+        });
+      } finally {
+        await deleteProject(project.id, false);
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
     const webapp = await createProject({ name: "Neutral wording", archetype: "webapp", sourcePath: process.cwd() });
     assert.deepEqual(webapp.settings.sources[0].contentGlobs, []);
     const { discoveryPrompt, questionsPrompt, scriptPrompt } = await import("../server/prompts.js");

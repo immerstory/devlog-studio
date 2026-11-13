@@ -143,6 +143,25 @@ export interface Material {
   group?: string;
   /** Set when an image generator made it; the video then credits it as generated. */
   generated?: { tool: "codex"; prompt: string };
+  /** Set when a material rule imported the file from a Git source. */
+  origin?: MaterialOrigin;
+}
+
+/** Fields of an imported material that the developer can edit. An edited field keeps its value on later imports. */
+export const ORIGIN_FIELDS = ["date", "title", "annotation", "tags", "group"] as const;
+export type OriginField = (typeof ORIGIN_FIELDS)[number];
+export interface MaterialOrigin {
+  sourceId: string;
+  ruleId: string;
+  /** Path of the file in the source. */
+  path: string;
+  /** Git blob of the imported file. */
+  blob: string;
+  /** Hash of the values the source gave at the last import, so that a change in the metadata file is noticed. */
+  values: string;
+  edited?: OriginField[];
+  /** Set while the file is no longer in the source or no longer matches a rule. */
+  removed?: boolean;
 }
 
 export interface MaterialDeletion { deleted: true; warning?: string }

@@ -12,6 +12,7 @@ import { PathField } from "./PathField";
 import { IntakeScheduleSection } from "./IntakeSchedule";
 import { ArchetypePicker, PromptGuidanceField } from "./ArchetypeFields";
 import { CoHostSection } from "./CoHostFields";
+import { MaterialRulesField } from "./MaterialRules";
 import { ActivitySourcesSection, EgressConnectionsSection } from "./PublishViews";
 import { BASE_URL_HINT, CONTENT_GLOBS_HINT, FEED_GLOBS_HINT, FEED_TOPICS_HINT, DEFAULT_TARGET_HINT, DESCRIPTION_HINT, descriptionExample, HEADER_ARGS_HINT, HEADER_HELPER_HINT, MCP_URL_HINT, NAME_HINT, PRIMARY_SOURCE_HINT, PUBLIC_TITLE_HINT, REQUEST_HEADERS_HINT, SLUG_HINT, SOURCE_LABEL_HINT, TARGET_CSS_HINT, TARGET_NAME_HINT, UNITY_PROJECT_HINT, USER_AGENT_HINT, WORKING_COPY_HINT } from "./project-fields";
 
@@ -125,6 +126,7 @@ export function ProjectSettingsPage({ project, onSaved }: { project: Project; on
             </div>
             <label>Content globs<ListInput value={source.contentGlobs} onChange={(v) => edit((p) => { p.settings.sources[i].contentGlobs = v; })} /><span className="field-hint">{CONTENT_GLOBS_HINT}</span></label>
             <label>Feed files<ListInput value={source.feedGlobs ?? []} onChange={(v) => edit((p) => { if (v.length) p.settings.sources[i].feedGlobs = v; else delete p.settings.sources[i].feedGlobs; })} /><span className="field-hint">{FEED_GLOBS_HINT}</span></label>
+            <MaterialRulesField value={source.materialRules ?? []} onChange={(rules) => edit((p) => { if (rules.length) p.settings.sources[i].materialRules = rules; else delete p.settings.sources[i].materialRules; })} />
             <div className="row">
               <label className="check"><input type="radio" name="primary-source" disabled={source.archived} checked={s.primarySourceId === source.id} onChange={() => edit((p) => { p.settings.primarySourceId = source.id; })} />Primary source</label>
               {source.archived ? <span className="muted small">Archived</span> : null}

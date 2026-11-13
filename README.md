@@ -50,7 +50,7 @@ Agents run through the signed-in CLIs, so they use your Claude or ChatGPT subscr
 
 Long work (progress checks, backfills, questions, scripts, captures, narration, renders, articles, uploads) runs on the server as a task. While a task runs, a floating task box at the bottom right shows it with its latest log line; click a task to see its full log. **Cancel** stops a task at its next step: a capture after the current shot or frame, an agent run, a render or an upload at once. Work already finished, such as shots captured before the cancel, is kept. You can keep working anywhere in the app meanwhile, and when a task finishes, the page of its project shows the results. Finished tasks stay listed for two minutes, failed ones until you hide them. Tasks live in the server's memory: restarting the server stops running tasks, and the task box reports them as stopped.
 
-1. **Add materials.** On **Materials**, upload screenshots and videos with the date they show, a title, tags and an annotation: the story behind them, such as an experiment, an abandoned version or a bug. To add files to an upload form, drop them on it, paste them or click to choose them. Materials appear on the calendar on their date. Image materials can also serve as slide backgrounds; they are used in turn and blurred. Without any, slides use blurred captures from the video itself. Choose them in the project's theme (see **Theme** below).
+1. **Add materials.** On **Materials**, upload screenshots and videos with the date they show, a title, tags and an annotation: the story behind them, such as an experiment, an abandoned version or a bug. To add files to an upload form, drop them on it, paste them or click to choose them. Materials appear on the calendar on their date. Image materials can also serve as slide backgrounds; they are used in turn and blurred. Without any, slides use blurred captures from the video itself. Choose them in the project's theme (see **Theme** below). A source can also supply materials from its committed files (see **Materials from a Git source** below).
 
    ![The Materials page with uploaded screenshots, their dates, titles, annotations and tags](docs/screenshots/materials.png)
 
@@ -277,6 +277,35 @@ Run `npx tsx scripts/session-preview.ts <folder> <from date> <source path>` to w
 A session that edits mostly outside the project's sources counts as other work, even when it runs in the project's folder. It starts excluded, and excluded records are hidden until you select **Show excluded**. **Include** brings one back. A session that edits nothing can't be told apart, so exclude it by hand.
 
 **GitHub, Forgejo and Gitea.** Pull requests, issues and releases of a source whose `origin` remote is on one of these. GitHub is read through the `gh` CLI, which must be signed in. Forgejo and Gitea need an access token with read access to repositories and issues, which you enter in the project settings and which stays on the server. Records from a private repository are private.
+
+## Materials from a Git source
+
+A source can supply materials from its committed images and videos, for example a repository of screenshots with a folder per release. Under **Project settings > Sources**, select **Add material rule** on the source. **Refresh activity** and the daily intake then import the files that a rule matches.
+
+- **Include** and **Exclude** take comma-separated patterns, such as `releases/**` and `**/drafts/**`. Only images and videos are imported, and the first rule that matches a file applies.
+- **Path pattern** takes values from the path. With `releases/{release}/{name}.{ext}`, the file `releases/0.3/forest-at-dawn.png` gets the tag `0.3` and the title `forest at dawn`. `{name}` gives the title and `{group}` the group. Other placeholders give tags, and `{ext}` and names that start with `_` give nothing. `{ext}` takes the part after the last dot. Without a pattern, the title comes from the file name.
+- **Metadata file** names a JSON file in each folder, `materials.json` by default. It describes the folder and some, all or none of its files:
+
+  ```json
+  {
+    "folder": { "commit": "a1b2c3d", "tags": ["release-0.3"], "group": "Release 0.3", "annotation": "The first build with weather." },
+    "files": {
+      "forest-at-dawn.png": { "title": "Forest at dawn", "annotation": "The new lighting.", "tags": ["lighting"] },
+      "old-menu.png": { "exclude": true }
+    }
+  }
+  ```
+
+  The folder and each file can have `annotation`, `tags`, `group`, `date` (YYYY-MM-DD) and `commit`. A file can also have `title` and `exclude`. A file's values replace the folder's, and the tags of the pattern, the folder and the file are combined. Other keys are ignored, so the file can hold more than this. When the file isn't valid JSON or doesn't fit the format, the import leaves the folder's files and materials as they are until you fix it, and the task log says why.
+- **Only files the metadata file lists** leaves out the files it doesn't name.
+- **Date.** A material's date comes from the first of these that the metadata gives: the file's `date` or `commit`, then the folder's `date` or `commit`. A `commit` is looked up in the project's active sources, so a screenshot set can name the build commit of the game it shows and get that commit's date. Without a date or commit, or when no active source has the commit, the day the file was first committed dates it.
+
+The import only reads the source. It reads committed files only and doesn't change the working copy. Files stored with Git LFS are left out, because the commit holds only a pointer to them, and the task log names them.
+
+- A file is stored again only when its content changes. A file with the same content as another imported file is skipped. When that other file has left the same source, the file was moved or renamed, and its material moves with it.
+- When the metadata changes, the material changes with it. A title, annotation, date, tag list or group that you edit in the app stays as you edited it.
+- A material whose file leaves the source, or no longer matches a rule, stays and is marked as no longer in its source.
+- A material that you delete isn't imported again from its path.
 
 ## Publishing elsewhere
 

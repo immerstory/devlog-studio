@@ -25,7 +25,7 @@ const run = promisify(execFile);
  * Git only reads the source repository: no index refresh and no clean filters. A clean filter such as Git LFS's
  * stores every file it reads in the repository, which can collide with the developer's own Git work.
  */
-const READ_ONLY = ["--no-optional-locks"];
+export const READ_ONLY = ["--no-optional-locks"];
 
 async function git(args: string[], maxBuffer = 64 * 1024 * 1024): Promise<string> {
   const { stdout } = await run("git", [...READ_ONLY, ...args], { cwd: currentSource().path, maxBuffer, windowsHide: true });

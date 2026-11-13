@@ -39,3 +39,10 @@ export const TARGET_CSS_HINT = "Optional. Added to every page this target films,
 export const REQUEST_HEADERS_HINT = "Sent with every request, one \"Name: value\" per line. The default asks sites not to track you, through Do Not Track and Global Privacy Control. Empty sends no extra headers.";
 
 export const WORKING_COPY_HINT = "The folder on this computer that holds the project's Git repository. The agent reads its commits and changes to suggest devlog topics, and does not change anything there.";
+
+export const MATERIAL_RULES_HINT = "Refresh activity imports the committed images and videos that a rule matches as materials. The first rule that matches a file applies. Edits you make to an imported material stay when the file changes, and a material you delete isn't imported again from its path.";
+export const MATERIAL_INCLUDE_HINT = "Comma-separated patterns of the files to import, such as releases/**/*.png. A pattern without a slash matches the file name in any folder.";
+export const MATERIAL_EXCLUDE_HINT = "Patterns of files to leave out, such as drafts/**.";
+export const MATERIAL_PATTERN_HINT = "Optional. Takes values from the path, such as releases/{release}/{name}.{ext}. {name} gives the title and {group} the group. Other placeholders give tags; {ext} and names that start with _ give nothing.";
+export const METADATA_FILE_HINT = "A JSON file in each folder that describes the folder and its files: titles, annotations, tags, groups and dates. Leave it empty to read none.";
+export const LISTED_ONLY_HINT = "Leaves out files that the folder's metadata file doesn't list.";
