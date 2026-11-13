@@ -158,6 +158,7 @@ async function removeSources(c: pg.PoolClient, pid: string, removed: Source[]) {
   }
   const records = (await c.query("SELECT id FROM activity WHERE project_id = $1 AND data->>'sourceId' = ANY($2)", [pid, [...ids]])).rows.map((r: { id: string }) => r.id);
   const images = (await c.query("DELETE FROM session_images WHERE project_id = $1 AND data->>'sourceId' = ANY($2) RETURNING id", [pid, [...ids]])).rows.map((r: { id: string }) => r.id);
+  await c.query("DELETE FROM source_files WHERE project_id = $1 AND data->>'sourceId' = ANY($2)", [pid, [...ids]]);
   await c.query("DELETE FROM activity_links WHERE project_id = $1 AND (a = ANY($2) OR b = ANY($2))", [pid, records]);
   await c.query("DELETE FROM activity WHERE project_id = $1 AND id = ANY($2)", [pid, records]);
   for (const row of (await c.query("SELECT key, value FROM settings WHERE key = ANY($1) OR key LIKE $2", [[`project:${pid}:snapshot`, `project:${pid}:backfilledWeeks`], `project:${pid}:activityCursor:%`])).rows) {
@@ -232,7 +233,7 @@ export async function resumeDeletion(pid: string, io = cleanupIO) {
       const owned = await uploads("=");
       const shared = new Set(await uploads("<>"));
       await c.query("DELETE FROM video_stats WHERE video_id = ANY($1)", [owned.filter((id) => !shared.has(id))]);
-      for (const table of ["suggestions", "notes", "materials", "posts", "runs", "activity", "activity_links", "session_images", "publications", "publication_stats"]) await c.query(`DELETE FROM ${table} WHERE project_id = $1`, [pid]);
+      for (const table of ["suggestions", "notes", "materials", "posts", "runs", "activity", "activity_links", "session_images", "source_files", "publications", "publication_stats"]) await c.query(`DELETE FROM ${table} WHERE project_id = $1`, [pid]);
       await c.query("DELETE FROM settings WHERE key LIKE $1", [`project:${pid}:%`]);
       manifest.rowsDeleted = true;
       await c.query("UPDATE projects SET data = $2 WHERE id = $1", [pid, { settings: p.settings, deletion: manifest }]);

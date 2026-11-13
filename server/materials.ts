@@ -59,6 +59,7 @@ export async function withClip(m: Material): Promise<Material> {
 }
 
 export const isMediaFile = (fileName: string) => IMAGE.test(fileName) || VIDEO.test(fileName);
+export const isVideoFile = (fileName: string) => VIDEO.test(fileName);
 
 export type MaterialFields = Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group" | "generated" | "origin">>;
 /**

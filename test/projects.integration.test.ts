@@ -161,7 +161,7 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal(materials.get("releases/0.2/hut.png")!.date, "2026-11-01", "without metadata, the first commit dates the file");
           assert.equal(materials.get("releases/0.3/lake.png")!.title, "lake");
 
-          assert.deepEqual(await importSourceMaterials(() => {}, io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, errors: first.errors }, "unchanged files aren't stored again");
+          assert.deepEqual(await importSourceMaterials(() => {}, io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, inbox: 0, errors: first.errors }, "unchanged files aren't stored again");
 
           await store.saveMaterial(project.id, (await import("../server/sourceMaterials.js")).withEdits(forest, { ...forest, title: "My title" }));
           media.write("releases/0.3/materials.json", { folder: { commit: build, tags: ["release"] }, files: { "forest.png": { title: "Forest at night", annotation: "Night light." }, "old.png": { exclude: true } } });
@@ -210,6 +210,45 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal((await importSourceMaterials(() => {}, io)).removed, 1, "without rules, the source's materials no longer match a rule");
           assert.equal((await byPath()).get("releases/0.4/forest.png")!.origin!.removed, true, "a material that no longer matches a rule stays");
           await assert.rejects(saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "r", include: ["a"] }, { id: "r", include: ["b"] }] } : x)) }), /unique IDs/);
+          const { addInboxFiles, inboxFileId, listInboxFiles, setInboxFileStatus } = await import("../server/sourceMaterials.js");
+          for (const name of ["a", "b", "c"]) media.write(`inbox/${name}.png`, `${name} pixels`);
+          media.commit("Add inbox files");
+          const settings = getProject(project.id).settings;
+          await saveProject(project.id, { ...settings, sources: settings.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "rule-2", include: ["inbox/**"], importTo: "inbox" as const }, ...rules] } : x)) });
+          const toInbox = await importSourceMaterials(() => {}, io);
+          assert.deepEqual([toInbox.inbox, toInbox.added], [3, 0], "an inbox rule's files wait in the inbox");
+          assert.deepEqual((await listInboxFiles(project.id)).map((f) => [f.path, f.status, f.fields.title]), [["inbox/a.png", "inbox", "a"], ["inbox/b.png", "inbox", "b"], ["inbox/c.png", "inbox", "c"]]);
+          const xmin = async () => (await query<{ xmin: string }>("SELECT xmin::text FROM source_files WHERE project_id = $1 ORDER BY id", [project.id])).map((r) => r.xmin).join();
+          const before = await xmin();
+          assert.equal((await importSourceMaterials(() => {}, io)).inbox, 0, "unchanged inbox files stay as they are");
+          assert.equal(await xmin(), before, "and their rows aren't written again");
+          const id = (name: string) => inboxFileId("media", `inbox/${name}.png`);
+          await setInboxFileStatus(id("b"), "dismissed");
+          const [added] = await addInboxFiles([id("a")], { title: "Mine" }, () => {}, io);
+          assert.deepEqual([added.title, added.origin?.path, added.origin?.edited], ["Mine", "inbox/a.png", ["title"]], "a title given when adding counts as an edit");
+          media.remove("inbox/c.png");
+          media.commit("Remove c");
+          const later = await importSourceMaterials(() => {}, io);
+          assert.deepEqual([later.added, later.updated, later.inbox], [0, 0, 0], "an added file is a material, and a dismissed file stays dismissed");
+          assert.deepEqual((await listInboxFiles(project.id)).map((f) => [f.path, f.status]), [["inbox/b.png", "dismissed"]], "a file that left the source leaves the inbox");
+          assert.equal((await byPath()).get("inbox/a.png")!.title, "Mine");
+          await assert.rejects(addInboxFiles([id("c")], {}, () => {}, io), /no longer in the inbox/);
+
+          const { inboxFilePath } = await import("../server/sourceMaterials.js");
+          assert.equal(fs.readFileSync((await inboxFilePath(id("b"))).file, "utf8"), "b pixels", "the inbox shows the committed file");
+          const withRules = getProject(project.id).settings;
+          const inboxOnly = (include: string[]) => ({ ...withRules, sources: withRules.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "rule-2", include, importTo: "inbox" as const }] } : x)) });
+          await saveProject(project.id, inboxOnly(["nothing/**"]));
+          await importSourceMaterials(() => {}, io);
+          assert.deepEqual((await listInboxFiles(project.id)).map((f) => [f.path, f.status]), [["inbox/b.png", "dismissed"]], "a dismissed file that no longer matches stays dismissed while it is in the source");
+          await saveProject(project.id, inboxOnly(["inbox/**", "moved/**"]));
+          fs.mkdirSync(path.join(media.dir, "moved"));
+          fs.renameSync(path.join(media.dir, "inbox/b.png"), path.join(media.dir, "moved/b.png"));
+          media.commit("Move b");
+          assert.equal((await importSourceMaterials(() => {}, io)).moved, 1);
+          assert.deepEqual((await listInboxFiles(project.id)).map((f) => [f.path, f.status]), [["moved/b.png", "dismissed"]], "a moved inbox file stays dismissed");
+          await saveProject(project.id, { ...getProject(project.id).settings, sources: getProject(project.id).settings.sources.map((x) => (x.id === "media" ? { ...x, archived: true } : x)) });
+          assert.deepEqual(await listInboxFiles(project.id), [], "an archived source's files leave the inbox list");
         });
       } finally {
         await deleteProject(project.id, false);

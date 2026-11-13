@@ -25,6 +25,8 @@ export interface MaterialRule {
   metadataFile?: string;
   /** Imports only files that the folder's metadata file lists. */
   listedOnly?: boolean;
+  /** "inbox" keeps new files under Materials > From sources until the developer adds them. Absent means "materials". */
+  importTo?: "materials" | "inbox";
 }
 export const DEFAULT_METADATA_FILE = "materials.json";
 
@@ -39,6 +41,7 @@ export function readMaterialRules(input: unknown): MaterialRule[] {
     ...(typeof r.pattern === "string" && r.pattern.trim() ? { pattern: r.pattern.trim() } : {}),
     ...(typeof r.metadataFile === "string" ? { metadataFile: r.metadataFile.trim() } : {}),
     ...(r.listedOnly === true ? { listedOnly: true } : {}),
+    ...(r.importTo === "inbox" ? { importTo: "inbox" as const } : {}),
   }));
 }
 export type FeedTopics = "briefing" | "story";

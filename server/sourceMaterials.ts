@@ -5,13 +5,14 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { DEFAULT_METADATA_FILE, type MaterialRule, type Source } from "../shared/projects.js";
-import { normalizeGroup, ORIGIN_FIELDS, type Material, type MaterialOrigin, type OriginField } from "../shared/types.js";
+import { normalizeGroup, ORIGIN_FIELDS, type InboxFile, type Material, type MaterialOrigin, type OriginField } from "../shared/types.js";
 import { CACHE_DIR } from "./config.js";
 import { projectId } from "./context.js";
+import { query } from "./db.js";
 import { activeSources, matchesGlob, READ_ONLY } from "./discovery.js";
 import { localDate } from "./ingress/provider.js";
 import { throwIfCancelled } from "./jobs.js";
-import { DELETED_SOURCE_FILES, ingestFile, isMediaFile, type IngestOptions, type MaterialFields } from "./materials.js";
+import { DELETED_SOURCE_FILES, ingestFile, isMediaFile, isVideoFile, type IngestOptions, type MaterialFields } from "./materials.js";
 import { deletePrefix } from "./storage.js";
 import { getValue, listMaterials, newId, updateMaterial } from "./store.js";
 
@@ -262,7 +263,7 @@ export interface ImportIO {
 }
 const storageIO: ImportIO = { ingest: ingestFile, removeFiles: deletePrefix };
 
-export interface ImportResult { added: number; updated: number; moved: number; removed: number; skipped: number; errors: string[] }
+export interface ImportResult { added: number; updated: number; moved: number; removed: number; skipped: number; inbox: number; errors: string[] }
 
 /** The fields from the source, except those the developer edited, which keep their stored value. */
 const merged = (m: Material, fields: MaterialFields): Material => {
@@ -290,15 +291,15 @@ export function oneImportAtATime<T>(pid: string, work: () => Promise<T>): Promis
  * Stores a file of a source as a new material, or as a new version of an existing one. The files of a version have a
  * folder of their own. A material deleted meanwhile stays deleted, and the folder that is no longer used is removed.
  */
-async function storeFile(source: Source, file: Pick<MatchedFile, "ruleId" | "path" | "blob" | "fields">, existing: Material | undefined, io: ImportIO, log: (line: string) => void, edited?: OriginField[]): Promise<Material | undefined> {
+async function storeFile(source: Source, file: Pick<MatchedFile, "ruleId" | "path" | "blob" | "fields">, existing: Material | undefined, io: ImportIO, log: (line: string) => void, edits?: { fields: MaterialFields; edited: OriginField[] }): Promise<Material | undefined> {
   const pid = projectId();
-  const origin: MaterialOrigin = { sourceId: source.id, ruleId: file.ruleId, path: file.path, blob: file.blob, values: valuesHash(file.fields), ...(edited?.length ? { edited } : {}) };
+  const origin: MaterialOrigin = { sourceId: source.id, ruleId: file.ruleId, path: file.path, blob: file.blob, values: valuesHash(file.fields), ...(edits?.edited.length ? { edited: edits.edited } : {}) };
   const tmp = path.join(CACHE_DIR, "uploads", "incoming", `${newId("src")}${path.extname(file.path)}`);
   fs.mkdirSync(path.dirname(tmp), { recursive: true });
   try {
     await writeBlob(source.path, file.blob, tmp);
     const version = file.blob.slice(0, 12);
-    if (!existing) return await io.ingest(tmp, path.posix.basename(file.path), { ...file.fields, origin }, { version });
+    if (!existing) return await io.ingest(tmp, path.posix.basename(file.path), { ...file.fields, ...edits?.fields, origin }, { version });
     const stored = await io.ingest(tmp, path.posix.basename(file.path), { ...file.fields, origin }, { id: existing.id, createdAt: existing.createdAt, version, save: false });
     let old: Material | undefined;
     const saved = await updateMaterial(pid, existing.id, (current) => {
@@ -323,13 +324,28 @@ function keepEdits(next: Material, current: Material, fields: MaterialFields, or
 const refresh = (pid: string, id: string, fields: MaterialFields, origin: Partial<MaterialOrigin>) =>
   updateMaterial(pid, id, (current) => (current?.origin ? merged({ ...current, origin: { ...current.origin, ...origin, removed: undefined } }, fields) : undefined));
 
+export const inboxFileId = (sourceId: string, filePath: string) => `sf-${crypto.createHash("sha256").update(fileKey(sourceId, filePath)).digest("hex").slice(0, 32)}`;
+const inboxRows = async (pid: string) => (await query<{ data: InboxFile }>("SELECT data FROM source_files WHERE project_id = $1 ORDER BY data->>'path'", [pid])).map((r) => r.data);
+/** Inbox files of the project's active sources. */
+export const listInboxFiles = async (pid: string) => {
+  const active = new Set(activeSources().map((s) => s.id));
+  return (await inboxRows(pid)).filter((f) => active.has(f.sourceId));
+};
+const saveInboxFile = (pid: string, f: InboxFile) =>
+  query("INSERT INTO source_files (project_id, id, data) VALUES ($1, $2, $3) ON CONFLICT (project_id, id) DO UPDATE SET data = $3", [pid, f.id, f]);
+const deleteInboxFile = (pid: string, id: string) => query("DELETE FROM source_files WHERE project_id = $1 AND id = $2", [pid, id]);
+/** True when the stored row already says what the import would store. */
+const sameInboxFile = (a: InboxFile, b: InboxFile) => a.blob === b.blob && a.ruleId === b.ruleId && a.kind === b.kind && a.status === b.status && valuesHash(a.fields) === valuesHash(b.fields);
+
 const DUPLICATES_LOGGED = 5;
 
 /**
  * Imports the files that the material rules of all active sources match. A file is stored again only when its blob
- * changes. A file with the content of another imported file is skipped, unless that file left the same source: then
- * its material moves to the new path. A material whose file leaves the source or no longer matches a rule stays,
- * marked as removed. A material the developer deleted isn't imported again from its path.
+ * changes. A file with the content of another imported file or inbox file is skipped, unless that file left the same
+ * source: then its material or inbox file moves to the new path. A material whose file leaves the source or no longer
+ * matches a rule stays, marked as removed. A material the developer deleted isn't imported again from its path, and a
+ * dismissed inbox file stays dismissed while it is in the source. An inbox rule's new files wait in the inbox; a file
+ * it already imported stays a material and follows the source.
  */
 export function importSourceMaterials(log: (line: string) => void = () => {}, io: ImportIO = storageIO): Promise<ImportResult> {
   const pid = projectId();
@@ -337,12 +353,14 @@ export function importSourceMaterials(log: (line: string) => void = () => {}, io
 }
 
 async function runImport(pid: string, log: (line: string) => void, io: ImportIO): Promise<ImportResult> {
-  const result: ImportResult = { added: 0, updated: 0, moved: 0, removed: 0, skipped: 0, errors: [] };
+  const result: ImportResult = { added: 0, updated: 0, moved: 0, removed: 0, skipped: 0, inbox: 0, errors: [] };
   const imported = (await listMaterials(pid)).filter((m) => m.origin);
-  const sources = activeSources().filter((s) => s.materialRules?.some((r) => r.include.length) || imported.some((m) => m.origin!.sourceId === s.id));
+  const waiting = await inboxRows(pid);
+  const sources = activeSources().filter((s) => s.materialRules?.some((r) => r.include.length) || imported.some((m) => m.origin!.sourceId === s.id) || waiting.some((f) => f.sourceId === s.id));
   if (!sources.length) return result;
   const byPath = new Map(imported.map((m) => [fileKey(m.origin!.sourceId, m.origin!.path), m]));
-  const blobs = new Map(imported.map((m) => [m.origin!.blob, fileKey(m.origin!.sourceId, m.origin!.path)]));
+  const inbox = new Map(waiting.map((f) => [fileKey(f.sourceId, f.path), f]));
+  const blobs = new Map([...waiting.map((f) => [f.blob, fileKey(f.sourceId, f.path)] as const), ...imported.map((m) => [m.origin!.blob, fileKey(m.origin!.sourceId, m.origin!.path)] as const)]);
   const deleted = new Set((await getValue<string[]>(pid, DELETED_SOURCE_FILES)) ?? []);
   for (const source of sources) {
     let match: SourceMatch;
@@ -355,19 +373,23 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
       log(message);
       continue;
     }
+    const toInbox = new Set((source.materialRules ?? []).filter((r) => r.importTo === "inbox").map((r) => r.id));
     const seen = new Set(match.held.map((p) => fileKey(source.id, p)));
     for (const file of match.files) {
       throwIfCancelled();
       const key = fileKey(source.id, file.path);
       seen.add(key);
-      if (deleted.has(key)) continue;
+      const waitingFile = inbox.get(key);
+      if (deleted.has(key) || waitingFile?.status === "dismissed") continue;
       const existing = byPath.get(key);
       const twin = blobs.get(file.blob);
       try {
-        if (!existing && twin && twin !== key) {
+        if (!existing && !waitingFile && twin && twin !== key) {
           const from = splitKey(twin);
+          const movable = from.sourceId === source.id && !match.paths.has(from.path);
           const moving = byPath.get(twin);
-          if (from.sourceId === source.id && !match.paths.has(from.path) && moving) {
+          const movingInbox = inbox.get(twin);
+          if (movable && moving) {
             const moved = await refresh(pid, moving.id, file.fields, { path: file.path, ruleId: file.ruleId, values: valuesHash(file.fields) });
             if (moved) {
               byPath.delete(twin);
@@ -377,8 +399,27 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
               log(`Moved ${from.path} to ${file.path}.`);
               continue;
             }
+          } else if (movable && movingInbox) {
+            const next: InboxFile = { ...movingInbox, id: inboxFileId(source.id, file.path), ruleId: file.ruleId, path: file.path, fields: file.fields };
+            await saveInboxFile(pid, next);
+            await deleteInboxFile(pid, movingInbox.id);
+            inbox.delete(twin);
+            inbox.set(key, next);
+            blobs.set(file.blob, key);
+            result.moved++;
+            log(`Moved ${from.path} to ${file.path} in the inbox.`);
+            continue;
           }
           if (result.skipped++ < DUPLICATES_LOGGED) log(`Skipped ${source.label}: ${file.path}, because ${from.path} has the same content.`);
+          continue;
+        }
+        if (!existing && toInbox.has(file.ruleId)) {
+          const next: InboxFile = { id: inboxFileId(source.id, file.path), sourceId: source.id, ruleId: file.ruleId, path: file.path, blob: file.blob, kind: isVideoFile(file.path) ? "video" : "image", fields: file.fields, status: "inbox" };
+          if (waitingFile && sameInboxFile(waitingFile, next)) continue;
+          await saveInboxFile(pid, next);
+          if (!waitingFile) result.inbox++;
+          inbox.set(key, next);
+          blobs.set(file.blob, key);
           continue;
         }
         if (existing && existing.origin!.blob === file.blob) {
@@ -391,6 +432,10 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
         if (!stored) continue;
         if (existing) result.updated++;
         else result.added++;
+        if (waitingFile) {
+          await deleteInboxFile(pid, waitingFile.id);
+          inbox.delete(key);
+        }
         byPath.set(key, stored);
         blobs.set(file.blob, key);
       } catch (err) {
@@ -403,8 +448,73 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
       const marked = await updateMaterial(pid, m.id, (current) => (current?.origin && !current.origin.removed && current.origin.path === m.origin!.path ? { ...current, origin: { ...current.origin, removed: true } } : undefined));
       if (marked) result.removed++;
     }
+    // A waiting file leaves the inbox when it no longer matches; a dismissed one only when it leaves the source.
+    for (const f of [...inbox.values()].filter((x) => x.sourceId === source.id && !seen.has(fileKey(source.id, x.path)))) {
+      if (f.status === "dismissed" && match.paths.has(f.path)) continue;
+      await deleteInboxFile(pid, f.id);
+      inbox.delete(fileKey(source.id, f.path));
+    }
   }
   if (result.skipped > DUPLICATES_LOGGED) log(`Skipped ${result.skipped - DUPLICATES_LOGGED} more files with the same content as another.`);
-  log(`Materials from sources: ${result.added} added, ${result.updated} updated, ${result.moved} moved, ${result.removed} no longer in their source, ${result.skipped} skipped as duplicates.`);
+  log(`Materials from sources: ${result.added} added, ${result.inbox} new in the inbox, ${result.updated} updated, ${result.moved} moved, ${result.removed} no longer in their source, ${result.skipped} skipped as duplicates.`);
   return result;
+}
+
+const notInInbox = () => Object.assign(new Error("This file is no longer in the inbox."), { status: 404 });
+async function loadInboxFile(pid: string, id: string): Promise<{ file: InboxFile; source: Source }> {
+  const file = (await query<{ data: InboxFile }>("SELECT data FROM source_files WHERE project_id = $1 AND id = $2", [pid, id]))[0]?.data;
+  const source = file && activeSources().find((s) => s.id === file.sourceId);
+  if (!file || !source) throw notInInbox();
+  return { file, source };
+}
+
+/** The committed content of an inbox file as a local file, kept by blob, so the browser can load parts of it. */
+export async function inboxFilePath(id: string): Promise<{ file: string; blob: string }> {
+  const { file, source } = await loadInboxFile(projectId(), id);
+  const dir = path.join(CACHE_DIR, "source-files");
+  const local = path.join(dir, `${file.blob}${path.posix.extname(file.path).toLowerCase()}`);
+  if (!fs.existsSync(local)) {
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${local}.${newId("part")}`;
+    try {
+      await writeBlob(source.path, file.blob, tmp);
+      fs.renameSync(tmp, local);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+  }
+  return { file: local, blob: file.blob };
+}
+
+/** Dismissing keeps the row, so later imports don't bring the file back while it is in the source. */
+export function setInboxFileStatus(id: string, status: InboxFile["status"]): Promise<InboxFile> {
+  const pid = projectId();
+  return oneImportAtATime(pid, async () => {
+    const { file } = await loadInboxFile(pid, id);
+    const next = { ...file, status };
+    await saveInboxFile(pid, next);
+    return next;
+  });
+}
+
+/**
+ * Makes inbox files materials that follow their source. Fields given here count as the developer's edits, so later
+ * imports keep them. It waits for a running import, so the import can't put an added file back in the inbox.
+ */
+export function addInboxFiles(ids: string[], fields: Partial<InboxFile["fields"]> = {}, log: (line: string) => void = () => {}, io: ImportIO = storageIO): Promise<Material[]> {
+  const pid = projectId();
+  return oneImportAtATime(pid, async () => {
+    const added: Material[] = [];
+    for (const id of ids) {
+      throwIfCancelled();
+      const { file, source } = await loadInboxFile(pid, id);
+      const edited = ORIGIN_FIELDS.filter((f) => f in fields && JSON.stringify(fields[f] ?? null) !== JSON.stringify(file.fields[f] ?? null));
+      const material = await storeFile(source, file, undefined, io, log, { fields: Object.fromEntries(edited.map((f) => [f, fields[f]])), edited });
+      await deleteInboxFile(pid, id);
+      fs.rmSync(path.join(CACHE_DIR, "source-files", `${file.blob}${path.posix.extname(file.path).toLowerCase()}`), { force: true });
+      log(`Added ${file.path}.`);
+      if (material) added.push(material);
+    }
+    return added;
+  });
 }

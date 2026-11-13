@@ -481,6 +481,11 @@
   .materials-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
   .si-toolbar select { width: auto; }
   .si-toolbar .check { white-space: nowrap; }
+  .sf-grid { row-gap: 14px; }
+  .sf-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in oklch, var(--muted) 30%, transparent); }
+  .sf-card .mthumb { border-radius: 6px; }
+  .sf-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .si-day { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
   .si-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .si-message { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; min-height: 3.6em; }

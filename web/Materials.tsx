@@ -6,12 +6,13 @@ import { api, apiUrl, fmtDate, mediaUrl } from "./api";
 import { usePersistent } from "./persistent";
 import { SegTabs } from "@/components/seg-tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { Material, MaterialDeletion } from "../shared/types";
+import type { InboxFile, Material, MaterialDeletion } from "../shared/types";
 import { MediaPicker, type MediaItem } from "./MediaPicker";
 import { isMedia, pastedMedia, pasteTarget, UPLOAD_FORM_ATTRIBUTE } from "./paste";
 import { JOB_FINISHED } from "./JobDock";
 import { largeSessionImage, SessionImagesInbox, toolName, type SessionContext } from "./SessionImages";
 import type { SessionImage } from "../shared/activity";
+import { SourceFilesInbox } from "./SourceFiles";
 
 /** Uploads files with shared date, annotation and tags; optional attachment to a suggestion or episode. */
 export async function uploadMaterials(files: File[], fields: { date: string; title?: string; annotation: string; tags: string; group?: string }, attach?: { suggestionId?: string; postId?: string }): Promise<Material[]> {
@@ -412,7 +413,7 @@ export function MaterialsPage({ materials, reload }: { materials: Material[]; re
   const [notice, setNotice] = useState("");
   const onDeleted = (warning?: string) => { setNotice(warning ?? "Material deleted."); reload(); };
   const shown = materials.filter((m) => !query || `${m.title} ${m.annotation} ${m.tags.join(" ")} ${m.group ?? ""} ${m.date}`.toLowerCase().includes(query.toLowerCase()));
-  const [tab, setTab] = usePersistent<"library" | "sessions">("materialsTab", "library");
+  const [tab, setTab] = usePersistent<"library" | "sessions" | "sources">("materialsTab", "library");
   const [sessionImages, setSessionImages] = useState<SessionImage[] | null>(null);
   const loadSessionImages = () => api<SessionImage[]>("/api/session-images").then(setSessionImages, () => setSessionImages([]));
   useEffect(() => {
@@ -421,8 +422,25 @@ export function MaterialsPage({ materials, reload }: { materials: Material[]; re
     addEventListener(JOB_FINISHED, finished);
     return () => removeEventListener(JOB_FINISHED, finished);
   }, []);
+  const [sourceFiles, setSourceFiles] = useState<InboxFile[] | null>(null);
+  const loadSourceFiles = () => api<InboxFile[]>("/api/source-files").then(setSourceFiles, () => setSourceFiles([]));
+  useEffect(() => {
+    void loadSourceFiles();
+    const finished = () => void loadSourceFiles();
+    addEventListener(JOB_FINISHED, finished);
+    return () => removeEventListener(JOB_FINISHED, finished);
+  }, []);
   const waiting = sessionImages?.filter((i) => i.status === "inbox").length ?? 0;
-  const tabs = <SegTabs value={tab} onChange={setTab} items={[{ value: "library", label: "Library" }, { value: "sessions", label: `From sessions${waiting ? ` · ${waiting}` : ""}` }]} />;
+  const fromSources = sourceFiles?.filter((f) => f.status === "inbox").length ?? 0;
+  const tabs = <SegTabs value={tab} onChange={setTab} items={[{ value: "library", label: "Library" }, { value: "sessions", label: `From sessions${waiting ? ` · ${waiting}` : ""}` }, { value: "sources", label: `From sources${fromSources ? ` · ${fromSources}` : ""}` }]} />;
+  if (tab === "sources") return (
+    <div className="panel pad materials-page">
+      <GroupOptions materials={materials} />
+      <h2>Materials</h2>
+      {tabs}
+      <SourceFilesInbox files={sourceFiles} reload={() => void loadSourceFiles()} onAdded={() => { void loadSourceFiles(); reload(); }} />
+    </div>
+  );
   if (tab === "sessions") return (
     <div className="panel pad materials-page">
       <GroupOptions materials={materials} />

@@ -46,3 +46,4 @@ export const MATERIAL_EXCLUDE_HINT = "Patterns of files to leave out, such as dr
 export const MATERIAL_PATTERN_HINT = "Optional. Takes values from the path, such as releases/{release}/{name}.{ext}. {name} gives the title and {group} the group. Other placeholders give tags; {ext} and names that start with _ give nothing.";
 export const METADATA_FILE_HINT = "A JSON file in each folder that describes the folder and its files: titles, annotations, tags, groups and dates. Leave it empty to read none.";
 export const LISTED_ONLY_HINT = "Leaves out files that the folder's metadata file doesn't list.";
+export const IMPORT_TO_HINT = "Materials adds new files at once. Inbox keeps them under Materials > From sources until you add or dismiss them. Files already added follow the source in both cases.";

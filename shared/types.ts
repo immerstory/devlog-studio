@@ -164,6 +164,20 @@ export interface MaterialOrigin {
   removed?: boolean;
 }
 
+/** A file that an inbox rule matched. It reaches no agent until the developer adds it to the materials. */
+export interface InboxFile {
+  id: string;
+  sourceId: string;
+  ruleId: string;
+  path: string;
+  blob: string;
+  kind: Material["kind"];
+  /** The fields it gets as a material, from the rule and the metadata file. */
+  fields: Pick<Material, "date" | "title" | "annotation" | "tags" | "group">;
+  /** Dismissed files stay dismissed when the source changes them. */
+  status: "inbox" | "dismissed";
+}
+
 export interface MaterialDeletion { deleted: true; warning?: string }
 
 /** Trims a group name; an empty name means no group. */

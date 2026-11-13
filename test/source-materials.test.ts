@@ -72,9 +72,9 @@ test("edits to an imported material are remembered, and uploaded materials don't
 
 test("material rules from settings or a request keep only the fields a rule has", () => {
   assert.deepEqual(readMaterialRules([
-    { id: "r1", include: ["a/**", " ", 3], exclude: [], pattern: " {name}.{ext} ", metadataFile: "", listedOnly: "yes", extra: 1 },
+    { id: "r1", include: ["a/**", " ", 3], exclude: [], pattern: " {name}.{ext} ", metadataFile: "", listedOnly: "yes", importTo: "inbox", extra: 1 },
     { include: ["b"] },
     null,
-  ]), [{ id: "r1", include: ["a/**"], pattern: "{name}.{ext}", metadataFile: "" }]);
+  ]), [{ id: "r1", include: ["a/**"], pattern: "{name}.{ext}", metadataFile: "", importTo: "inbox" }]);
   assert.deepEqual(readMaterialRules("nope"), []);
 });

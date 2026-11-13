@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { StoryRequest } from "../shared/types.js";
 import { videoOutput } from "./outputs/index.js";
 import { outputsWithSegment } from "../shared/outputs.js";
@@ -75,9 +76,9 @@ import { activityView, discoverSources, saveForgeToken, setManualLink, setVisibi
 import { captureOperation } from "./capture/provider.js";
 
 import { handleUpload, removeMaterial } from "./materials.js";
-import { withEdits } from "./sourceMaterials.js";
+import { addInboxFiles, importSourceMaterials, inboxFilePath, listInboxFiles, setInboxFileStatus, withEdits } from "./sourceMaterials.js";
 import { listFolders } from "./folders.js";
-import { serveObject } from "./storage.js";
+import { contentTypeOf, serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
 import { checkPostLinks, pageChecks } from "./capture/browser/checks.js";
 import { generateSegmentImages } from "./imagegen.js";
@@ -349,6 +350,36 @@ projectApi.post("/session-images/:id/material", h((req) => {
     ...(Array.isArray(b.tags) ? { tags: b.tags.filter((t) => typeof t === "string") } : {}),
     ...("group" in b ? { group: normalizeGroup(b.group) } : {}),
   });
+}));
+
+// ---------- files from sources ----------
+
+projectApi.get("/source-files", h(() => listInboxFiles(projectId())));
+projectApi.post("/source-files/import", h(() => startJob("sourceMaterials", "project", (log) => importSourceMaterials(log))));
+projectApi.get("/source-files/:id/file", h(async (req, res) => {
+  const { file, blob } = await inboxFilePath(param(req, "id"));
+  // A blob never changes, and sendFile answers range requests, which video previews need.
+  await new Promise<void>((resolve, reject) => res.sendFile(file, { headers: { "Content-Type": contentTypeOf(file), "Cache-Control": "private, max-age=86400", ETag: `"${blob}"` } }, (err) => (err && !res.headersSent ? reject(err) : resolve())));
+}));
+projectApi.patch("/source-files/:id", h((req) => {
+  const status = req.body?.status;
+  if (status !== "inbox" && status !== "dismissed") throw bad("Use the status inbox or dismissed");
+  return setInboxFileStatus(param(req, "id"), status);
+}));
+/** Adds inbox files to the materials as a job. Fields apply to every file and count as edits. */
+projectApi.post("/source-files/add", h((req) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter((x: unknown): x is string => typeof x === "string");
+  if (!ids.length) throw bad("Choose files to add");
+  const b = (req.body?.fields ?? {}) as Partial<Material>;
+  const fields = {
+    ...(isDate(b.date) ? { date: b.date } : {}),
+    ...(typeof b.title === "string" ? { title: b.title } : {}),
+    ...(typeof b.annotation === "string" ? { annotation: b.annotation } : {}),
+    ...(Array.isArray(b.tags) ? { tags: b.tags.filter((t) => typeof t === "string") } : {}),
+    ...("group" in b ? { group: normalizeGroup(b.group) } : {}),
+  };
+  // One job per request, so adding another file while one is added isn't lost.
+  return startJob("sourceFilesAdd", `add:${crypto.createHash("sha256").update([...ids].sort().join("\n")).digest("hex").slice(0, 16)}`, (log) => addInboxFiles(ids, fields, log));
 }));
 
 // ---------- episodes ----------
