@@ -181,6 +181,8 @@ export interface InboxFile {
   fields: Pick<Material, "date" | "title" | "annotation" | "tags" | "group">;
   /** Dismissed files stay dismissed when the source changes them. */
   status: "inbox" | "dismissed";
+  /** Set while a dismissed file is missing from its source, for example on another branch. The inbox hides it. */
+  gone?: boolean;
 }
 
 /** How an imported file's date was found: from the metadata's date, from a commit it names, or from the file's first commit. */

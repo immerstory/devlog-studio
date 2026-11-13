@@ -195,10 +195,14 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.deepEqual(removed, [`materials/${lakeBefore.id}/${execFileSync("git", ["rev-parse", "HEAD:releases/0.3/twin.png"], { cwd: media.dir }).toString().trim().slice(0, 12)}/`], "and the new version's files are removed");
           const deletedPaths = async () => ((await store.getValue<string[]>(project.id, store.DELETED_SOURCE_FILES)) ?? []).sort();
           assert.ok((await deletedPaths()).includes("media:releases/0.2/hut.png"));
+          const switchTo = (args: string[]) => execFileSync("git", ["switch", "-q", ...args], { cwd: media.dir });
+          switchTo(["-c", "without-hut"]);
           media.remove("releases/0.2/hut.png");
           media.commit("Remove hut");
           await importSourceMaterials(() => {}, io);
-          assert.ok(!(await deletedPaths()).includes("media:releases/0.2/hut.png"), "a deleted file that left the source leaves the deleted list");
+          assert.ok((await deletedPaths()).includes("media:releases/0.2/hut.png"), "a deleted file missing on another branch stays on the deleted list");
+          switchTo(["-"]);
+          assert.equal((await importSourceMaterials(() => {}, io)).added, 0, "and stays deleted after switching back");
 
           fs.mkdirSync(path.join(media.dir, "releases/0.4"));
           fs.renameSync(path.join(media.dir, "releases/0.3/forest.png"), path.join(media.dir, "releases/0.4/forest.png"));
@@ -250,9 +254,9 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           media.commit("Add d");
           const preview = await previewRules("media", [{ id: "rule-2", include: ["inbox/**"], importTo: "inbox" }, ...rules, { id: "rule-3", include: ["nothing/**"] }]);
           assert.deepEqual(Object.fromEntries(preview.files.map((f) => [f.path, f.state])), {
-            "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.3/twin.png": "deleted",
+            "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.2/hut.png": "deleted", "releases/0.3/twin.png": "deleted",
           }, "forest.png's folder has an invalid metadata file, so the preview leaves it out too");
-          assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 1, "rule-3": 0 });
+          assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 2, "rule-3": 0 });
           assert.equal(preview.errors.length, 3, "the invalid metadata files and the Git LFS pointer are reported");
           assert.equal((await listInboxFiles(project.id)).length, 1, "a preview changes nothing");
           media.remove("inbox/d.png");
@@ -271,6 +275,14 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           media.commit("Move b");
           assert.equal((await importSourceMaterials(() => {}, io)).moved, 1);
           assert.deepEqual((await listInboxFiles(project.id)).map((f) => [f.path, f.status]), [["moved/b.png", "dismissed"]], "a moved inbox file stays dismissed");
+          switchTo(["-c", "without-b"]);
+          media.remove("moved/b.png");
+          media.commit("Remove b");
+          await importSourceMaterials(() => {}, io);
+          assert.deepEqual(await listInboxFiles(project.id), [], "a dismissed file missing on another branch is hidden");
+          switchTo(["-"]);
+          assert.equal((await importSourceMaterials(() => {}, io)).inbox, 0, "and stays dismissed after switching back");
+          assert.deepEqual((await listInboxFiles(project.id)).map((f) => [f.path, f.status]), [["moved/b.png", "dismissed"]]);
           await saveProject(project.id, { ...getProject(project.id).settings, sources: getProject(project.id).settings.sources.map((x) => (x.id === "media" ? { ...x, archived: true } : x)) });
           assert.deepEqual(await listInboxFiles(project.id), [], "an archived source's files leave the inbox list");
 

@@ -344,10 +344,10 @@ const refresh = (pid: string, id: string, fields: MaterialFields, origin: Partia
 
 export const inboxFileId = (sourceId: string, filePath: string) => `sf-${crypto.createHash("sha256").update(fileKey(sourceId, filePath)).digest("hex").slice(0, 32)}`;
 const inboxRows = async (pid: string) => (await query<{ data: InboxFile }>("SELECT data FROM source_files WHERE project_id = $1 ORDER BY data->>'path'", [pid])).map((r) => r.data);
-/** Inbox files of the project's active sources. */
+/** Inbox files of the project's active sources, without dismissed files that are missing from their source. */
 export const listInboxFiles = async (pid: string) => {
   const active = new Set(activeSources().map((s) => s.id));
-  return (await inboxRows(pid)).filter((f) => active.has(f.sourceId));
+  return (await inboxRows(pid)).filter((f) => active.has(f.sourceId) && !f.gone);
 };
 const saveInboxFile = (pid: string, f: InboxFile) =>
   query("INSERT INTO source_files (project_id, id, data) VALUES ($1, $2, $3) ON CONFLICT (project_id, id) DO UPDATE SET data = $3", [pid, f.id, f]);
@@ -398,6 +398,7 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
       const key = fileKey(source.id, file.path);
       seen.add(key);
       const waitingFile = inbox.get(key);
+      if (waitingFile?.status === "dismissed" && waitingFile.gone) await saveInboxFile(pid, { ...waitingFile, gone: undefined });
       if (deleted.has(key) || waitingFile?.status === "dismissed") continue;
       const existing = byPath.get(key);
       const twin = blobs.get(file.blob);
@@ -418,7 +419,7 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
               continue;
             }
           } else if (movable && movingInbox) {
-            const next: InboxFile = { ...movingInbox, id: inboxFileId(source.id, file.path), ruleId: file.ruleId, path: file.path, fields: file.fields };
+            const next: InboxFile = { ...movingInbox, id: inboxFileId(source.id, file.path), ruleId: file.ruleId, path: file.path, fields: file.fields, gone: undefined };
             await saveInboxFile(pid, next);
             await deleteInboxFile(pid, movingInbox.id);
             inbox.delete(twin);
@@ -466,15 +467,14 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
       const marked = await updateMaterial(pid, m.id, (current) => (current?.origin && !current.origin.removed && current.origin.path === m.origin!.path ? { ...current, origin: { ...current.origin, removed: true } } : undefined));
       if (marked) result.removed++;
     }
-    // The deleted list keeps only files still in the source, so it doesn't grow without end.
-    const gone = [...deleted].filter((key) => splitKey(key).sourceId === source.id && !match.paths.has(splitKey(key).path));
-    if (gone.length) {
-      await updateValue<string[]>(pid, DELETED_SOURCE_FILES, (list = []) => list.filter((key) => !gone.includes(key)));
-      for (const key of gone) deleted.delete(key);
-    }
-    // A waiting file leaves the inbox when it no longer matches; a dismissed one only when it leaves the source.
+    // A waiting file leaves the inbox when it no longer matches. A dismissed file stays: when it is missing, for example
+    // on another branch of the source, it is hidden until it is back.
     for (const f of [...inbox.values()].filter((x) => x.sourceId === source.id && !seen.has(fileKey(source.id, x.path)))) {
-      if (f.status === "dismissed" && match.paths.has(f.path)) continue;
+      if (f.status === "dismissed") {
+        const gone = !match.paths.has(f.path);
+        if (gone !== !!f.gone) await saveInboxFile(pid, { ...f, gone: gone || undefined });
+        continue;
+      }
       await deleteInboxFile(pid, f.id);
       inbox.delete(fileKey(source.id, f.path));
     }
@@ -553,7 +553,7 @@ export async function previewRules(sourceId: string, rules: MaterialRule[], log:
   if (!source) throw Object.assign(new Error("Save the source first, then preview its rules."), { status: 400 });
   const found = await matchSourceFiles({ ...source, materialRules: rules }, log);
   const materials = new Map((await listMaterials(pid)).filter((m) => m.origin).map((m) => [fileKey(m.origin!.sourceId, m.origin!.path), m]));
-  const inbox = new Map((await listInboxFiles(pid)).map((f) => [fileKey(f.sourceId, f.path), f]));
+  const inbox = new Map((await inboxRows(pid)).map((f) => [fileKey(f.sourceId, f.path), f]));
   const deleted = new Set((await getValue<string[]>(pid, DELETED_SOURCE_FILES)) ?? []);
   const blobs = new Map<string, string>();
   for (const m of materials.values()) blobs.set(m.origin!.blob, fileKey(m.origin!.sourceId, m.origin!.path));
