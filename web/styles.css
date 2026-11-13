@@ -481,6 +481,11 @@
   .materials-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
   .si-toolbar select { width: auto; }
   .si-toolbar .check { white-space: nowrap; }
+  .sf-grid { row-gap: 14px; }
+  .sf-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in oklch, var(--muted) 30%, transparent); }
+  .sf-card .mthumb { border-radius: 6px; }
+  .sf-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .si-day { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
   .si-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .si-message { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; min-height: 3.6em; }
@@ -503,6 +508,11 @@
   .settings-savebar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0 16px; border-top: 1px solid var(--border); background: var(--background); }
   .row.align-end { align-items: flex-end; }
   .settings-subhead.first { margin-top: 0; padding-top: 0; border-top: 0; }
+  .material-rules { display: flex; flex-direction: column; gap: 8px; }
+  .rule-preview { max-height: 60vh; overflow: auto; }
+  .rule-preview table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .rule-preview th, .rule-preview td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+  .material-rule { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
   .theme-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
   .theme-swatch { width: 28px; height: 28px; border-radius: 6px; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 20%, transparent); }
   .theme-summary { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }

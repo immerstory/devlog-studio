@@ -16,6 +16,7 @@ import { localDate } from "./provider.js";
 import { digestHash, mergeDigests, sessionConnector } from "./sessions.js";
 import { importingSources, importSessionImages } from "../sessionImages.js";
 import { feedContext, syncFeeds } from "./feeds.js";
+import { importSourceMaterials } from "../sourceMaterials.js";
 import { shorten } from "./redact.js";
 
 export function commitRecord(c: CommitEvidence): ActivityRecord {
@@ -140,6 +141,10 @@ export async function syncActivity(range: DateRange, log: (l: string) => void = 
     const feeds = await syncFeeds(range, log);
     result.records += feeds.records;
     result.errors.push(...feeds.errors);
+  }
+  if (!only) {
+    try { result.errors.push(...(await importSourceMaterials(log)).errors); }
+    catch (err) { const message = `Materials from sources: ${(err as Error).message}`; result.errors.push(message); log(message); }
   }
   if (!only && importingSources(project.activitySources).length) {
     try { await importSessionImages(log); }

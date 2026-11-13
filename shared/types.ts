@@ -143,7 +143,54 @@ export interface Material {
   group?: string;
   /** Set when an image generator made it; the video then credits it as generated. */
   generated?: { tool: "codex"; prompt: string };
+  /** Set when a material rule imported the file from a Git source. */
+  origin?: MaterialOrigin;
 }
+
+/** Fields of an imported material that the developer can edit. An edited field keeps its value on later imports. */
+export const ORIGIN_FIELDS = ["date", "title", "annotation", "tags", "group"] as const;
+export type OriginField = (typeof ORIGIN_FIELDS)[number];
+export interface MaterialOrigin {
+  sourceId: string;
+  ruleId: string;
+  /** Path of the file in the source. */
+  path: string;
+  /** Git blob of the imported file. */
+  blob: string;
+  /** Hash of the values the source gave at the last import, so that a change in the metadata file is noticed. */
+  values: string;
+  edited?: OriginField[];
+  /** Set while the file is no longer in the source or no longer matches a rule. */
+  removed?: boolean;
+}
+
+/** Which materials the Materials page shows: all, those uploaded in the app, those of one source, or those whose file left its source. */
+export type OriginFilter = "all" | "uploaded" | "removed" | `source:${string}`;
+export const matchesOrigin = (m: Pick<Material, "origin">, filter: OriginFilter) =>
+  filter === "all" ? true : filter === "uploaded" ? !m.origin : filter === "removed" ? !!m.origin?.removed : m.origin?.sourceId === filter.slice("source:".length);
+
+/** A file that an inbox rule matched. It reaches no agent until the developer adds it to the materials. */
+export interface InboxFile {
+  id: string;
+  sourceId: string;
+  ruleId: string;
+  path: string;
+  blob: string;
+  kind: Material["kind"];
+  /** The fields it gets as a material, from the rule and the metadata file. */
+  fields: Pick<Material, "date" | "title" | "annotation" | "tags" | "group">;
+  /** Dismissed files stay dismissed when the source changes them. */
+  status: "inbox" | "dismissed";
+  /** Set while a dismissed file is missing from its source, for example on another branch. The inbox hides it. */
+  gone?: boolean;
+}
+
+/** How an imported file's date was found: from the metadata's date, from a commit it names, or from the file's first commit. */
+export type DateFrom = "metadata" | "commit" | "first-commit";
+/** What the import would do with a file: add it to the materials or the inbox, keep it there, update or move its material, or leave it out. */
+export type PreviewState = "new" | "new-inbox" | "inbox" | "material" | "moved" | "dismissed" | "deleted" | "duplicate";
+export interface PreviewFile { path: string; ruleId: string; fields: InboxFile["fields"]; dateFrom: DateFrom; state: PreviewState }
+export interface RulePreview { total: number; files: PreviewFile[]; matchesPerRule: Record<string, number>; errors: string[] }
 
 export interface MaterialDeletion { deleted: true; warning?: string }
 

@@ -39,7 +39,7 @@ export function projectHref(path = "/calendar") { return activeProject ? `#/p/${
 export function apiUrl(url: string) {
   const bumperAudio = /^\/api\/project-bumper-audio\/(intro|outro)$/.exec(url);
   if (activeProject && bumperAudio) return `/api/projects/${activeProject.id}/settings/bumper-audio/${bumperAudio[1]}`;
-  if (!activeProject || !/^\/api\/(state|discover|backfill|session-review|session-images|intake|feeds|git|theme-preview|theme|notes|suggestions|materials|posts|publications|activity|unity|stats|open|project-config)(\/|\?|$)/.test(url)) return url;
+  if (!activeProject || !/^\/api\/(state|discover|backfill|session-review|session-images|source-files|intake|feeds|git|theme-preview|theme|notes|suggestions|materials|posts|publications|activity|unity|stats|open|project-config)(\/|\?|$)/.test(url)) return url;
   return `/api/projects/${activeProject.id}/${url.slice(5).replace(/^project-config/, "settings/runtime")}`;
 }
 

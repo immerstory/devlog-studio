@@ -58,13 +58,24 @@ export async function withClip(m: Material): Promise<Material> {
   }
 }
 
+export const isMediaFile = (fileName: string) => IMAGE.test(fileName) || VIDEO.test(fileName);
+export const isVideoFile = (fileName: string) => VIDEO.test(fileName);
+
+export type MaterialFields = Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group" | "generated" | "origin">>;
+/**
+ * Where a new file is stored. `id` and `createdAt` keep an existing material. `version` names a folder of its own for the
+ * files, because the local cache can't tell a replaced object of the same size from the old one.
+ */
+export interface IngestOptions { id?: string; createdAt?: string; version?: string; /** False leaves storing the record to the caller. */ save?: boolean }
+
 /** Stores an uploaded file as a material: original, thumbnail and preview go to Garage. */
-export async function ingestFile(file: string, fileName: string, fields: Partial<Pick<Material, "date" | "title" | "annotation" | "tags" | "group" | "generated">>): Promise<Material> {
+export async function ingestFile(file: string, fileName: string, fields: MaterialFields, options: IngestOptions = {}): Promise<Material> {
   const video = VIDEO.test(fileName);
   if (!video && !IMAGE.test(fileName)) throw Object.assign(new Error(`Unsupported file type: ${fileName}`), { status: 400 });
-  const id = newId("mat");
+  const id = options.id ?? newId("mat");
+  const folder = `materials/${id}/${options.version ? `${options.version}/` : ""}`;
   const info = await probe(file);
-  const dir = path.join(CACHE_DIR, "uploads", id);
+  const dir = path.join(CACHE_DIR, "uploads", `${id}-${options.version ?? "upload"}`);
   fs.mkdirSync(dir, { recursive: true });
   const thumb = path.join(dir, "thumb.jpg");
   const preview = path.join(dir, "preview.jpg");
@@ -75,28 +86,29 @@ export async function ingestFile(file: string, fileName: string, fields: Partial
   const safeName = fileName.replace(/[^\w.\- ]+/g, "_");
   const m: Material = {
     id,
-    createdAt: new Date().toISOString(),
+    createdAt: options.createdAt ?? new Date().toISOString(),
     date: fields.date && /^\d{4}-\d{2}-\d{2}$/.test(fields.date) ? fields.date : today(),
     kind: video ? "video" : "image",
     fileName,
     contentType: contentTypeOf(fileName),
     size: fs.statSync(file).size,
-    key: `materials/${id}/${safeName}`,
-    thumbKey: `materials/${id}/thumb.jpg`,
-    previewKey: `materials/${id}/preview.jpg`,
-    ...(clip ? { clipKey: `materials/${id}/clip.mp4` } : {}),
+    key: `${folder}${safeName}`,
+    thumbKey: `${folder}thumb.jpg`,
+    previewKey: `${folder}preview.jpg`,
+    ...(clip ? { clipKey: `${folder}clip.mp4` } : {}),
     ...info,
     title: fields.title?.trim() || path.basename(fileName, path.extname(fileName)),
     annotation: fields.annotation?.trim() ?? "",
     tags: fields.tags ?? [],
     group: normalizeGroup(fields.group),
     ...(fields.generated ? { generated: fields.generated } : {}),
+    ...(fields.origin ? { origin: fields.origin } : {}),
   };
   await putFile(m.key, file);
   await putFile(m.thumbKey, thumb);
   await putFile(m.previewKey, preview);
   if (clip && m.clipKey) await putFile(m.clipKey, clip);
-  await saveMaterial(projectId(), m);
+  if (options.save !== false) await saveMaterial(projectId(), m);
   fs.rmSync(dir, { recursive: true, force: true });
   return m;
 }
@@ -171,10 +183,32 @@ export function receiveSingleFile(req: Request): Promise<{ path: string; name: s
   });
 }
 
-export async function removeMaterial(id: string, removeFiles = deletePrefix) {
-  return deleteMaterial(projectId(), id, () => removeFiles(`materials/${id}/`));
+export { DELETED_SOURCE_FILES } from "./store.js";
+
+/** Deletes a material with its files. An imported material's path joins the deleted list in the same transaction. */
+export const removeMaterial = (id: string, removeFiles = deletePrefix) => deleteMaterial(projectId(), id, () => removeFiles(`materials/${id}/`));
+
+
+/** The number of imported materials that one agent run sees at most, so a large source can't flood a run with images. */
+export const IMPORTED_PER_RUN = 12;
+
+/**
+ * Keeps every uploaded material, every material attached to a suggestion or a post, and the first IMPORTED_PER_RUN of
+ * the other imported ones, in the order given. Attaching is the developer's choice, so it isn't limited.
+ */
+export function limitImported(materials: Material[], attached: ReadonlySet<string>, log?: (line: string) => void): Material[] {
+  let imported = 0;
+  const kept = materials.filter((m) => !m.origin || attached.has(m.id) || imported++ < IMPORTED_PER_RUN);
+  const left = materials.length - kept.length;
+  if (left && log) log(`Left out ${left} imported material${left === 1 ? "" : "s"}, because a run sees at most ${IMPORTED_PER_RUN}. Attach them to a suggestion or a post to use them.`);
+  return kept;
 }
 
+/**
+ * New materials for a progress check: those created since the last check. An imported material also needs its own date
+ * on or after the check's first day, because importing a folder creates materials of every date at once.
+ */
+export const progressMaterials = (materials: Material[], firstDay: string) => materials.filter((m) => !m.origin || m.date >= firstDay);
 
 /**
  * Local preview images for the agent, which reads files from disk.

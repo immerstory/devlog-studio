@@ -1,8 +1,9 @@
+import crypto from "node:crypto";
 import type { StoryRequest } from "../shared/types.js";
 import { videoOutput } from "./outputs/index.js";
 import { outputsWithSegment } from "../shared/outputs.js";
 import { sourceUsage, listProjects, loadProjects, getProject, createProject, saveProject, deleteProject, resumeDeletion, checkSource, listConnections, getConnection, saveConnection, deleteConnection, publicConnection } from "./projects.js";
-import type { ProjectSettings, YouTubeConnection } from "../shared/projects.js";
+import { readMaterialRules, type ProjectSettings, type YouTubeConnection } from "../shared/projects.js";
 import { projectId, inContext } from "./context.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,7 +14,6 @@ import { config, saveConfig, loadConfig, globalConfig, saveGlobal, publicConfig,
 import { migrate } from "./db.js";
 import {
   deleteNote,
-  getMaterials,
   getSuggestions,
   getSnapshot,
   insertNote,
@@ -24,7 +24,7 @@ import {
   listSuggestions,
   loadPost,
   newId,
-  saveMaterial,
+  updateMaterial,
   saveScript,
   today,
   updatePost,
@@ -76,8 +76,9 @@ import { activityView, discoverSources, saveForgeToken, setManualLink, setVisibi
 import { captureOperation } from "./capture/provider.js";
 
 import { handleUpload, removeMaterial } from "./materials.js";
+import { addInboxFiles, importAgain, importSourceMaterials, inboxFilePath, listInboxFiles, previewRules, setInboxFileStatus, withEdits } from "./sourceMaterials.js";
 import { listFolders } from "./folders.js";
-import { serveObject } from "./storage.js";
+import { contentTypeOf, serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
 import { checkPostLinks, pageChecks } from "./capture/browser/checks.js";
 import { generateSegmentImages } from "./imagegen.js";
@@ -300,26 +301,24 @@ projectApi.post(
     const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).filter((x: unknown): x is string => typeof x === "string");
     if (!ids.length) throw bad("Select materials to group");
     const group = normalizeGroup(req.body.group);
-    const items = await getMaterials(projectId(), ids);
-    for (const m of items) await saveMaterial(projectId(), { ...m, group });
-    return items.length;
+    let count = 0;
+    for (const id of ids) if (await updateMaterial(projectId(), id, (m) => (m ? withEdits(m, { ...m, group }) : undefined))) count++;
+    return count;
   }),
 );
 projectApi.patch(
   "/materials/:id",
   h(async (req) => {
-    const [m] = await getMaterials(projectId(), [param(req, "id")]);
-    if (!m) throw Object.assign(new Error("Material not found"), { status: 404 });
     const b = req.body as Partial<Material>;
-    const next: Material = {
+    const next = await updateMaterial(projectId(), param(req, "id"), (m) => m && withEdits(m, {
       ...m,
       date: isDate(b.date) ? b.date : m.date,
       title: typeof b.title === "string" ? b.title : m.title,
       annotation: typeof b.annotation === "string" ? b.annotation : m.annotation,
-      tags: Array.isArray(b.tags) ? b.tags : m.tags,
+      tags: Array.isArray(b.tags) ? b.tags.filter((t): t is string => typeof t === "string") : m.tags,
       group: "group" in b ? normalizeGroup(b.group) : m.group,
-    };
-    await saveMaterial(projectId(), next);
+    }));
+    if (!next) throw Object.assign(new Error("Material not found"), { status: 404 });
     return next;
   }),
 );
@@ -351,6 +350,47 @@ projectApi.post("/session-images/:id/material", h((req) => {
     ...(Array.isArray(b.tags) ? { tags: b.tags.filter((t) => typeof t === "string") } : {}),
     ...("group" in b ? { group: normalizeGroup(b.group) } : {}),
   });
+}));
+
+// ---------- files from sources ----------
+
+projectApi.get("/source-files", h(() => listInboxFiles(projectId())));
+projectApi.post("/source-files/import", h(() => startJob("sourceMaterials", "project", (log) => importSourceMaterials(log))));
+/** Takes deleted files of a source off the deleted list, so the next import brings them back. */
+projectApi.post("/source-files/import-again", h(async (req) => {
+  const paths = (Array.isArray(req.body?.paths) ? req.body.paths : []).filter((x: unknown): x is string => typeof x === "string");
+  if (!paths.length) throw bad("Choose files to import again");
+  return { count: await importAgain(String(req.body?.sourceId ?? ""), paths) };
+}));
+/** Matches a saved source's rules, as edited and not yet saved, without importing. */
+projectApi.post("/source-files/preview", h((req) => {
+  const sourceId = String(req.body?.sourceId ?? "");
+  return startJob("sourceMaterialsPreview", `preview:${sourceId}`, (log) => previewRules(sourceId, readMaterialRules(req.body?.rules), log));
+}));
+projectApi.get("/source-files/:id/file", h(async (req, res) => {
+  const { file, blob } = await inboxFilePath(param(req, "id"));
+  // A blob never changes, and sendFile answers range requests, which video previews need.
+  await new Promise<void>((resolve, reject) => res.sendFile(file, { headers: { "Content-Type": contentTypeOf(file), "Cache-Control": "private, max-age=86400", ETag: `"${blob}"` } }, (err) => (err && !res.headersSent ? reject(err) : resolve())));
+}));
+projectApi.patch("/source-files/:id", h((req) => {
+  const status = req.body?.status;
+  if (status !== "inbox" && status !== "dismissed") throw bad("Use the status inbox or dismissed");
+  return setInboxFileStatus(param(req, "id"), status);
+}));
+/** Adds inbox files to the materials as a job. Fields apply to every file and count as edits. */
+projectApi.post("/source-files/add", h((req) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter((x: unknown): x is string => typeof x === "string");
+  if (!ids.length) throw bad("Choose files to add");
+  const b = (req.body?.fields ?? {}) as Partial<Material>;
+  const fields = {
+    ...(isDate(b.date) ? { date: b.date } : {}),
+    ...(typeof b.title === "string" ? { title: b.title } : {}),
+    ...(typeof b.annotation === "string" ? { annotation: b.annotation } : {}),
+    ...(Array.isArray(b.tags) ? { tags: b.tags.filter((t) => typeof t === "string") } : {}),
+    ...("group" in b ? { group: normalizeGroup(b.group) } : {}),
+  };
+  // One job per request, so adding another file while one is added isn't lost.
+  return startJob("sourceFilesAdd", `add:${crypto.createHash("sha256").update([...ids].sort().join("\n")).digest("hex").slice(0, 16)}`, (log) => addInboxFiles(ids, fields, log));
 }));
 
 // ---------- episodes ----------
