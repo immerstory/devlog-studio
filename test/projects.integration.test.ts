@@ -266,6 +266,12 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.deepEqual((await listInboxFiles(project.id)).map((f) => [f.path, f.status]), [["moved/b.png", "dismissed"]], "a moved inbox file stays dismissed");
           await saveProject(project.id, { ...getProject(project.id).settings, sources: getProject(project.id).settings.sources.map((x) => (x.id === "media" ? { ...x, archived: true } : x)) });
           assert.deepEqual(await listInboxFiles(project.id), [], "an archived source's files leave the inbox list");
+
+          const left = (await store.listMaterials(project.id)).filter((m) => m.origin);
+          assert.ok(left.length >= 2);
+          await Promise.all(left.map((m) => removeMaterial(m.id, async () => {})));
+          const deletedList = (await store.getValue<string[]>(project.id, store.DELETED_SOURCE_FILES)) ?? [];
+          assert.ok(left.every((m) => deletedList.includes(`media:${m.origin!.path}`)), "deletions at the same moment all reach the deleted list");
         });
       } finally {
         await deleteProject(project.id, false);

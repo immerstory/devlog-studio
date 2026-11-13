@@ -7,7 +7,7 @@ import Busboy from "busboy";
 import type { Request } from "express";
 import { CACHE_DIR } from "./config.js";
 import { cached, contentTypeOf, deletePrefix, putFile } from "./storage.js";
-import { deleteMaterial, getMaterials, getValue, newId, saveMaterial, setValue, today } from "./store.js";
+import { deleteMaterial, getMaterials, newId, saveMaterial, today } from "./store.js";
 import { normalizeGroup } from "../shared/types.js";
 import type { Material } from "../shared/types.js";
 
@@ -183,19 +183,10 @@ export function receiveSingleFile(req: Request): Promise<{ path: string; name: s
   });
 }
 
-/** Files of sources whose materials the developer deleted, as "sourceId:path". The import leaves them out. */
-export const DELETED_SOURCE_FILES = "sourceMaterials:deleted";
+export { DELETED_SOURCE_FILES } from "./store.js";
 
-export async function removeMaterial(id: string, removeFiles = deletePrefix) {
-  const pid = projectId();
-  const [m] = await getMaterials(pid, [id]);
-  const result = await deleteMaterial(pid, id, () => removeFiles(`materials/${id}/`));
-  if (m?.origin) {
-    const deleted = new Set((await getValue<string[]>(pid, DELETED_SOURCE_FILES)) ?? []);
-    await setValue(pid, DELETED_SOURCE_FILES, [...deleted.add(`${m.origin.sourceId}:${m.origin.path}`)]);
-  }
-  return result;
-}
+/** Deletes a material with its files. An imported material's path joins the deleted list in the same transaction. */
+export const removeMaterial = (id: string, removeFiles = deletePrefix) => deleteMaterial(projectId(), id, () => removeFiles(`materials/${id}/`));
 
 
 /** The number of imported materials that one agent run sees at most, so a large source can't flood a run with images. */

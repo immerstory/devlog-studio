@@ -55,6 +55,18 @@ export async function validateReferences(c: pg.PoolClient, pid: string, entity: 
 export async function getValue<T>(pid: string, key: string): Promise<T | undefined> {
   return (await query<{ value: T }>("SELECT value FROM settings WHERE key = $1", [`project:${pid}:${key}`]))[0]?.value;
 }
+/** Files of sources whose materials the developer deleted, as "sourceId:path". The import leaves them out. */
+export const DELETED_SOURCE_FILES = "sourceMaterials:deleted";
+
+/** Changes a project value under the project's lock, inside the caller's transaction. */
+export async function changeValue<T>(c: pg.PoolClient, pid: string, key: string, fn: (value: T | undefined) => T): Promise<T> {
+  const current = (await c.query<{ value: T }>("SELECT value FROM settings WHERE key = $1", [`project:${pid}:${key}`])).rows[0]?.value;
+  const next = fn(current);
+  await c.query("INSERT INTO settings VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [`project:${pid}:${key}`, JSON.stringify(next)]);
+  return next;
+}
+/** Changes a project value under the project's lock, so two changes at once don't lose one. */
+export const updateValue = <T>(pid: string, key: string, fn: (value: T | undefined) => T) => projectWrite(pid, (c) => changeValue(c, pid, key, fn));
 export async function setValue(pid: string, key: string, value: unknown) {
   await projectWrite(pid, async (c) => { await c.query("INSERT INTO settings VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [`project:${pid}:${key}`, JSON.stringify(value)]); });
 }
@@ -141,7 +153,11 @@ export async function updateMaterial(pid: string, id: string, fn: (m: Material |
 /** Detach all uses and delete the row under the same project lock as reference writes. */
 export async function deleteMaterial(pid: string, id: string, removeFiles?: () => Promise<void>): Promise<MaterialDeletion> {
   const updated = await projectWrite(pid, async (c) => {
-    if (!(await c.query("SELECT id FROM materials WHERE id = $1 AND project_id = $2", [id, pid])).rowCount) throw notFound("Material");
+    const material = (await c.query<{ data: Material }>("SELECT data FROM materials WHERE id = $1 AND project_id = $2", [id, pid])).rows[0]?.data;
+    if (!material) throw notFound("Material");
+    // In the same transaction, so the import can't bring back a material that is being deleted.
+    const origin = material.origin;
+    if (origin) await changeValue<string[]>(c, pid, DELETED_SOURCE_FILES, (list = []) => [...new Set([...list, `${origin.sourceId}:${origin.path}`])]);
     for (const row of (await c.query<{ data: Post }>("SELECT data FROM posts WHERE project_id = $1 FOR UPDATE", [pid])).rows) {
       detachMaterial(row.data, id);
       await c.query("UPDATE posts SET data = $2 WHERE id = $1 AND project_id = $3", [row.data.id, row.data, pid]);
