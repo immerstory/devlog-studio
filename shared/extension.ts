@@ -10,6 +10,13 @@ import type { Ctx, Platform } from "../video/platform";
 
 export type { BumperAnimation, BumperSetup, BumperStyle, Ctx, Platform, ThemeColors };
 
+/**
+ * Font families to name before a generic family, as in `bold 96px DevlogSans, sans-serif`. Where the server's canvas
+ * draws no letters in `sans-serif` or `cursive`, as on some Linux systems, these names stand for an installed font
+ * that does. Elsewhere, and in the browser, they are skipped.
+ */
+export type FallbackFamily = "DevlogSans" | "DevlogCursive";
+
 /** A bumper style with its animation. Style IDs are unique across all extensions. */
 export interface ExtensionBumper extends BumperStyle {
   animation: BumperAnimation;

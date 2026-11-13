@@ -3,7 +3,8 @@ import type { DevlogExtension, ExtensionBumper } from "devlog-studio/extension";
 /** Seconds the backdrop and the text take to fade. */
 const FADE_SECONDS = 0.5;
 const FAMILY = "DevlogTitleCard";
-const FALLBACK = "'Arial Black', Impact, sans-serif";
+/** DevlogSans keeps the text visible where the server's canvas draws no letters in sans-serif. */
+const FALLBACK = "'Arial Black', Impact, DevlogSans, sans-serif";
 const fade = (value: number) => Math.max(0, Math.min(1, value));
 
 const titleCard: ExtensionBumper = {

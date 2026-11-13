@@ -1,3 +1,4 @@
+import type { FallbackFamily } from "../shared/extension";
 import { frameAt, frameRect } from "../shared/framing";
 import { STACK_STAGGER_SECONDS, themeColors, type Caption, type ThemeColors, type TimelineBumper, type TimelineProps, type TimelineSegment } from "../shared/types";
 import { BUMPER_ANIMATIONS } from "./bumpers";
@@ -10,7 +11,7 @@ const DISPLAY_FAMILY = "DevlogDisplay";
  * Families that the server registers only where the canvas draws no letters in a generic family, as on some Linux
  * systems. A browser doesn't know them and skips them, so the preview keeps its fonts.
  */
-export const FALLBACK_FAMILIES = { sans: "DevlogSans", cursive: "DevlogCursive" } as const;
+export const FALLBACK_FAMILIES = { sans: "DevlogSans", cursive: "DevlogCursive" } as const satisfies Record<string, FallbackFamily>;
 const DISPLAY = `${DISPLAY_FAMILY}, 'Segoe Print', 'Comic Sans MS', ${FALLBACK_FAMILIES.cursive}, cursive`;
 const BODY = `'Segoe UI', Inter, ${FALLBACK_FAMILIES.sans}, system-ui, sans-serif`;
 /** The font stacks of a video's text, without size and weight. */

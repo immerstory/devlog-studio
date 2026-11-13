@@ -131,7 +131,7 @@ An extension adds bumper styles and theme presets without changing this reposito
              return (ctx, frame) => {
                ctx.globalAlpha = Math.min(1, frame / 15);
                ctx.fillStyle = "#fff";
-               ctx.font = "bold 96px sans-serif";
+               ctx.font = "bold 96px DevlogSans, sans-serif";
                ctx.textAlign = "center";
                ctx.fillText(String(params.text || title), width / 2, height / 2);
                ctx.globalAlpha = 1;
@@ -147,7 +147,7 @@ An extension adds bumper styles and theme presets without changing this reposito
 
 3. Restart the app. The style appears under **Project settings > Theme > Edit theme…**.
 
-The same file runs on the server for the export and in the browser for the preview. So use no Node.js APIs in it, and import from Devlog Studio only with `import type`. Load fonts and other files in `prepare` through `platform`, because `prepare` runs once per video. The function it returns draws one frame on a transparent canvas of the video's full size, and frames can arrive in any order. If an extension fails to load, the app doesn't start, and the error names its folder.
+The same file runs on the server for the export and in the browser for the preview. So use no Node.js APIs in it, and import from Devlog Studio only with `import type`. Load fonts and other files in `prepare` through `platform`, because `prepare` runs once per video. The function it returns draws one frame on a transparent canvas of the video's full size, and frames can arrive in any order. Put `DevlogSans` before `sans-serif` and `DevlogCursive` before `cursive` in a font: on some Linux systems the server's canvas draws no letters in the generic families, and these names then stand for an installed font that does. Elsewhere, and in the browser, they are skipped. If an extension fails to load, the app doesn't start, and the error names its folder.
 
 ### Add a theme preset
 
