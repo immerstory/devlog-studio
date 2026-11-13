@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { describeFile, parseMetadata, patternValues, ruleMatches, withEdits } from "../server/sourceMaterials.js";
 import { readMaterialRules, type MaterialRule } from "../shared/projects.js";
-import type { Material } from "../shared/types.js";
+import { matchesOrigin, type Material } from "../shared/types.js";
 
 const rule = (extra: Partial<MaterialRule> = {}): MaterialRule => ({ id: "rule-1", include: ["releases/**"], ...extra });
 
@@ -77,4 +77,14 @@ test("material rules from settings or a request keep only the fields a rule has"
     null,
   ]), [{ id: "r1", include: ["a/**"], pattern: "{name}.{ext}", metadataFile: "", importTo: "inbox" }]);
   assert.deepEqual(readMaterialRules("nope"), []);
+});
+
+test("the origin filter tells uploaded materials from those of each source", () => {
+  const origin = (sourceId: string, removed?: boolean) => ({ origin: { sourceId, ruleId: "r", path: "a.png", blob: "b", values: "v", ...(removed ? { removed } : {}) } });
+  const uploaded = {}, media = origin("media"), gone = origin("media", true), other = origin("other");
+  const shown = (filter: Parameters<typeof matchesOrigin>[1]) => [uploaded, media, gone, other].map((m) => matchesOrigin(m, filter));
+  assert.deepEqual(shown("all"), [true, true, true, true]);
+  assert.deepEqual(shown("uploaded"), [true, false, false, false]);
+  assert.deepEqual(shown("source:media"), [false, true, true, false]);
+  assert.deepEqual(shown("removed"), [false, false, true, false]);
 });

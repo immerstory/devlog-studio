@@ -83,7 +83,7 @@ function ProjectContent({ project, path, reloadProjects, onState }: { project: P
   const post = /^\/post\/(.+)$/.exec(path);
   return <>
     {error && <div className="error">{error}</div>}
-    {!state ? <p className="muted pad">Loading…</p> : path === "/stats" ? <StatsPage /> : path === "/activity" ? <ActivityPage /> : path === "/posts" ? <PostsPage /> : path === "/materials" ? <MaterialsPage materials={state.materials} reload={reload} /> : post ? <CaptureTargetsContext.Provider value={{ targets: project.settings.captureTargets, defaultId: project.settings.defaultCaptureTargetId }}><PostView id={post[1]} materials={state.materials} suggestions={state.suggestions} onChange={reload} /></CaptureTargetsContext.Provider> : <Calendar state={state} reload={reload} />}
+    {!state ? <p className="muted pad">Loading…</p> : path === "/stats" ? <StatsPage /> : path === "/activity" ? <ActivityPage /> : path === "/posts" ? <PostsPage /> : path === "/materials" ? <MaterialsPage materials={state.materials} sources={project.settings.sources} reload={reload} /> : post ? <CaptureTargetsContext.Provider value={{ targets: project.settings.captureTargets, defaultId: project.settings.defaultCaptureTargetId }}><PostView id={post[1]} materials={state.materials} suggestions={state.suggestions} onChange={reload} /></CaptureTargetsContext.Provider> : <Calendar state={state} reload={reload} />}
   </>;
 }
 function NewProjectDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (open: boolean) => void; onCreated: (p: Project) => Promise<void> }) {

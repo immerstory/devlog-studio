@@ -164,6 +164,11 @@ export interface MaterialOrigin {
   removed?: boolean;
 }
 
+/** Which materials the Materials page shows: all, those uploaded in the app, those of one source, or those whose file left its source. */
+export type OriginFilter = "all" | "uploaded" | "removed" | `source:${string}`;
+export const matchesOrigin = (m: Pick<Material, "origin">, filter: OriginFilter) =>
+  filter === "all" ? true : filter === "uploaded" ? !m.origin : filter === "removed" ? !!m.origin?.removed : m.origin?.sourceId === filter.slice("source:".length);
+
 /** A file that an inbox rule matched. It reaches no agent until the developer adds it to the materials. */
 export interface InboxFile {
   id: string;

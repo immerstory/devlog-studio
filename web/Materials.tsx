@@ -6,7 +6,8 @@ import { api, apiUrl, fmtDate, mediaUrl } from "./api";
 import { usePersistent } from "./persistent";
 import { SegTabs } from "@/components/seg-tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { InboxFile, Material, MaterialDeletion } from "../shared/types";
+import { matchesOrigin, type InboxFile, type Material, type MaterialDeletion, type OriginFilter } from "../shared/types";
+import type { Source } from "../shared/projects";
 import { MediaPicker, type MediaItem } from "./MediaPicker";
 import { isMedia, pastedMedia, pasteTarget, UPLOAD_FORM_ATTRIBUTE } from "./paste";
 import { JOB_FINISHED } from "./JobDock";
@@ -200,7 +201,7 @@ export function MaterialThumb({ m, onRemove, onClick, selected }: { m: Material;
   return (
     <div
       className={`mthumb ${selected ? "selected" : ""} ${selectable ? "selectable" : ""}`}
-      title={`${m.date} · ${m.title}\n${m.annotation}`}
+      title={`${m.date} · ${m.title}\n${m.annotation}${m.origin ? `\nFrom ${m.origin.path}${m.origin.removed ? ", no longer in its source" : ""}` : ""}`}
       onClick={onClick}
       role={selectable ? "checkbox" : undefined}
       aria-checked={selectable ? selected : undefined}
@@ -345,7 +346,22 @@ function MaterialFields({ m, onSaved, onDeleted }: { m: Material; onSaved: () =>
         </Button>
         <span className="muted small">{m.fileName}</span>
       </div>
+      {m.origin ? <OriginLine m={m} /> : null}
       {err ? <div className="error small">{err}</div> : null}
+    </div>
+  );
+}
+
+/** Labels of the project's sources, for showing where imported materials come from. */
+const SourceLabels = React.createContext<Record<string, string>>({});
+
+/** Where an imported material comes from, and whether its file is still there. */
+function OriginLine({ m }: { m: Material }) {
+  const labels = React.useContext(SourceLabels);
+  const origin = m.origin!;
+  return (
+    <div className={`small ${origin.removed ? "error" : "muted"}`} title={origin.edited?.length ? `Edited here, kept on import: ${origin.edited.join(", ")}` : "Follows its source"}>
+      From {labels[origin.sourceId] ?? "a removed source"}: {origin.path}{origin.removed ? " · no longer in its source" : ""}
     </div>
   );
 }
@@ -406,13 +422,16 @@ function MaterialDialog({ m, onClose, onSaved, onDeleted }: { m: Material | unde
   );
 }
 
-export function MaterialsPage({ materials, reload }: { materials: Material[]; reload: () => void }) {
+export function MaterialsPage({ materials, sources, reload }: { materials: Material[]; sources: Source[]; reload: () => void }) {
   const [query, setQuery] = useState("");
+  const [origin, setOrigin] = useState<OriginFilter>("all");
+  const labels = useMemo(() => Object.fromEntries(sources.map((s) => [s.id, s.label])), [sources]);
+  const importedFrom = [...new Set(materials.flatMap((m) => (m.origin ? [m.origin.sourceId] : [])))];
   const [layout, setLayout] = usePersistent<"list" | "grid">("materialsLayout", "list");
   const [editing, setEditing] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const onDeleted = (warning?: string) => { setNotice(warning ?? "Material deleted."); reload(); };
-  const shown = materials.filter((m) => !query || `${m.title} ${m.annotation} ${m.tags.join(" ")} ${m.group ?? ""} ${m.date}`.toLowerCase().includes(query.toLowerCase()));
+  const shown = materials.filter((m) => matchesOrigin(m, origin) && (!query || `${m.title} ${m.annotation} ${m.tags.join(" ")} ${m.group ?? ""} ${m.date} ${m.origin?.path ?? ""}`.toLowerCase().includes(query.toLowerCase())));
   const [tab, setTab] = usePersistent<"library" | "sessions" | "sources">("materialsTab", "library");
   const [sessionImages, setSessionImages] = useState<SessionImage[] | null>(null);
   const loadSessionImages = () => api<SessionImage[]>("/api/session-images").then(setSessionImages, () => setSessionImages([]));
@@ -450,6 +469,7 @@ export function MaterialsPage({ materials, reload }: { materials: Material[]; re
     </div>
   );
   return (
+    <SourceLabels.Provider value={labels}>
     <div className="panel pad materials-page">
       <GroupOptions materials={materials} />
       <h2>Materials</h2>
@@ -459,6 +479,14 @@ export function MaterialsPage({ materials, reload }: { materials: Material[]; re
       <UploadForm onDone={reload} />
       <div className="row">
         <input className="grow" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {importedFrom.length ? (
+          <select className="w-auto" aria-label="Origin" value={origin} onChange={(e) => setOrigin(e.target.value as OriginFilter)}>
+            <option value="all">All origins</option>
+            <option value="uploaded">Uploaded here</option>
+            {importedFrom.map((id) => <option key={id} value={`source:${id}`}>From {labels[id] ?? "a removed source"}</option>)}
+            <option value="removed">No longer in their source</option>
+          </select>
+        ) : null}
         <SegTabs
           value={layout}
           onChange={setLayout}
@@ -484,5 +512,6 @@ export function MaterialsPage({ materials, reload }: { materials: Material[]; re
       {!shown.length ? <p className="muted">{materials.length ? "Nothing matches." : "No materials yet."}</p> : null}
       <MaterialDialog m={materials.find((m) => m.id === editing)} onClose={() => setEditing(null)} onSaved={reload} onDeleted={onDeleted} />
     </div>
+    </SourceLabels.Provider>
   );
 }

@@ -309,6 +309,8 @@ The import only reads the source. It reads committed files only and doesn't chan
 - A material whose file leaves the source, or no longer matches a rule, stays and is marked as no longer in its source.
 - A material that you delete isn't imported again from its path.
 
+On **Materials**, an imported material shows its source and path. **Origin** shows only the materials uploaded in the app, those of one source, or those whose file is no longer in its source. Search also finds a material by its path.
+
 ## Publishing elsewhere
 
 Besides YouTube, a post can go to Bluesky, LinkedIn, a folder or a Git-based site. All of them are connections under **Global settings > Publishing**. A video uploads from the post's **Final** step, and the others go out from its **Article** and **Publish** steps, where you also see each video's status.
