@@ -88,3 +88,18 @@ test("the origin filter tells uploaded materials from those of each source", () 
   assert.deepEqual(shown("source:media"), [false, true, true, false]);
   assert.deepEqual(shown("removed"), [false, false, true, false]);
 });
+
+test("a progress check takes imported materials of its own days only, and a run sees a limited number of them", async () => {
+  const { IMPORTED_PER_RUN, limitImported, progressMaterials } = await import("../server/materials.js");
+  const origin = { sourceId: "s", ruleId: "r", path: "a.png", blob: "b", values: "v" };
+  const uploaded = { id: "up", date: "2020-01-01" } as Material;
+  const old = { id: "old", date: "2026-01-01", origin } as Material;
+  const recent = { id: "recent", date: "2026-03-02", origin } as Material;
+  assert.deepEqual(progressMaterials([uploaded, old, recent], "2026-03-01").map((m) => m.id), ["up", "recent"], "an uploaded material counts whatever its date");
+  const many = Array.from({ length: IMPORTED_PER_RUN + 3 }, (_, i) => ({ id: `m${i}`, date: "2026-03-02", origin }) as Material);
+  const lines: string[] = [];
+  const kept = limitImported([uploaded, ...many], (l) => lines.push(l));
+  assert.deepEqual(kept.map((m) => m.id), ["up", ...many.slice(0, IMPORTED_PER_RUN).map((m) => m.id)]);
+  assert.match(lines[0], /Left out 3 imported materials/);
+  assert.equal(limitImported([uploaded, recent]).length, 2);
+});

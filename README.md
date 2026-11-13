@@ -308,6 +308,7 @@ The import only reads the source. It reads committed files only and doesn't chan
 - When the metadata changes, the material changes with it. A title, annotation, date, tag list or group that you edit in the app stays as you edited it.
 - A material whose file leaves the source, or no longer matches a rule, stays and is marked as no longer in its source.
 - A material that you delete isn't imported again from its path.
+- Agents see imported materials like uploaded ones, with two limits, because a rule can import a large folder at once. A progress check uses an imported material only when its date falls in the days it checks. A progress check, a backfill week, a review with sessions or a post you describe sees at most 12 imported materials; the task log says how many it left out. Materials you attach to a suggestion or a post always count.
 
 On **Materials**, an imported material shows its source and path. **Origin** shows only the materials uploaded in the app, those of one source, or those whose file is no longer in its source. Search also finds a material by its path.
 
