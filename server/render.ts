@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, execFile, execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, ImageData as CanvasImageData, loadImage, type Canvas } from "@napi-rs/canvas";
 import { CancelledError, currentJobSignal } from "./jobs.js";
@@ -39,6 +39,44 @@ async function decodeWithFfmpeg(file: Buffer): Promise<Picture> {
   const image = await loadImage(stream);
   return { source: image as unknown as CanvasImageSource, width: image.width, height: image.height };
 }
+
+/** The generic CSS families that the renderer's font stacks end with. */
+export const GENERIC_FAMILIES = ["sans-serif", "system-ui", "cursive", "serif", "monospace"];
+
+/** True when the canvas draws visible Latin letters in this font. A colour emoji font, for example, draws none. */
+export function drawsLetters(font: string): boolean {
+  const canvas = createCanvas(64, 32);
+  const ctx = canvas.getContext("2d");
+  ctx.font = `24px ${font}`;
+  ctx.fillText("Hg", 4, 26);
+  const pixels = ctx.getImageData(0, 0, 64, 32).data;
+  for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) return true;
+  return false;
+}
+
+/** The family that fontconfig picks for a generic family, as a browser on the same machine does. Empty without fontconfig. */
+function systemFamily(generic: string): string | undefined {
+  try { return execFileSync("fc-match", ["-f", "%{family[0]}", generic], { encoding: "utf8", timeout: 2000, windowsHide: true }).trim() || undefined; }
+  catch { return undefined; }
+}
+
+/** The first candidate family that draws letters. */
+export const letterFamily = (candidates: Array<string | undefined>, draws: (font: string) => boolean = drawsLetters) =>
+  candidates.find((f): f is string => !!f && draws(`'${f}'`));
+
+/**
+ * The canvas library resolves generic families by itself, not through fontconfig. When its choice draws no letters,
+ * for example a colour emoji font on Linux, every text of a video comes out empty. Such a family then becomes an
+ * alias of the system's choice for it, or of the first installed family that draws letters.
+ */
+export function resolveGenericFamilies(families = GENERIC_FAMILIES, match = systemFamily) {
+  for (const generic of families) {
+    if (drawsLetters(generic)) continue;
+    const target = letterFamily([match(generic), ...GlobalFonts.families.map((f) => f.family)]);
+    if (target) GlobalFonts.setAlias(target, generic);
+  }
+}
+resolveGenericFamilies();
 
 export const serverPlatform: Platform = {
   createCanvas: (w, h) => createCanvas(w, h) as unknown as HTMLCanvasElement,
