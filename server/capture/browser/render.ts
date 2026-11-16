@@ -8,6 +8,7 @@ import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { coveringDialog, coveringPaywall, hideNotices, inspectPage, refuseConsent } from "./verify.js";
 import { highlightScript } from "./highlight.js";
 import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
+import { retryReplacedPage } from "./replaced-page.js";
 
 /** The Chrome build this version of Puppeteer is made for. */
 const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
@@ -94,7 +95,13 @@ export interface PageSession {
  * frame, however long a screenshot takes. Lazy-loaded content still loads: page time waits for pending
  * network requests.
  */
-export async function openPage(opts: { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void }): Promise<PageSession> {
+export function openPage(opts: OpenPageOptions): Promise<PageSession> {
+  return retryReplacedPage(() => openPageOnce(opts), opts.log);
+}
+
+type OpenPageOptions = { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void };
+
+async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
   const orientation = opts.output.height > opts.output.width ? "portrait" : "landscape";
   const width = VIEWPORT_WIDTH[opts.device][orientation];
   // Rounded up, so the clip of the exact output size always fits inside the viewport.

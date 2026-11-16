@@ -2,6 +2,7 @@ import puppeteer, { type HTTPResponse, type Page } from "puppeteer-core";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { blockedReason, chromePath, PHONE_AGENT } from "./render.js";
 import { blockAds } from "./ads.js";
+import { REPLACED_PAGE, retryReplacedPage } from "./replaced-page.js";
 
 /** Text as a reader sees it: case, spacing, dashes and the kind of quote mark don't matter, since articles and their quotes often differ there. */
 export const readable = (text: string) =>
@@ -206,6 +207,15 @@ ${text}`).includes(readable(highlight)) : undefined;
 
 /** Opens a page only to check it, without filming. A page that doesn't load is a failed check, not an error. */
 export async function checkPage(url: string, shot: Pick<PageShot, "credit" | "expect" | "highlight">, opts: { userAgent?: string; headers?: Record<string, string>; device?: PageDevice } = {}): Promise<PageCheck> {
+  try {
+    return await retryReplacedPage(() => checkPageOnce(url, shot, opts), () => {});
+  } catch (err) {
+    return { url, checkedAt: new Date().toISOString(), ok: false, problem: (err as Error).message === REPLACED_PAGE ? REPLACED_PAGE : `The page didn't load: ${(err as Error).message}`, ...(shot.expect?.trim() ? { expect: shot.expect.trim() } : {}) };
+  }
+}
+
+/** One attempt at checkPage. Errors reach the caller, so a replaced page can be opened again. */
+async function checkPageOnce(url: string, shot: Pick<PageShot, "credit" | "expect" | "highlight">, opts: { userAgent?: string; headers?: Record<string, string>; device?: PageDevice }): Promise<PageCheck> {
   const browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio"] });
   try {
     const page = await browser.newPage();
@@ -227,8 +237,6 @@ export async function checkPage(url: string, shot: Pick<PageShot, "credit" | "ex
     await new Promise((r) => setTimeout(r, LATE_PAYWALL_MS));
     const paywall = await coveringPaywall(page).catch(() => undefined);
     return paywall ? { ...check, ok: false, problem: `A paywall covers the page (“${paywall}…”). Show this source on a slide instead.` } : check;
-  } catch (err) {
-    return { url, checkedAt: new Date().toISOString(), ok: false, problem: `The page didn't load: ${(err as Error).message}`, ...(shot.expect?.trim() ? { expect: shot.expect.trim() } : {}) };
   } finally {
     await browser.close().catch(() => {});
   }
