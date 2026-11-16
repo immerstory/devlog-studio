@@ -113,8 +113,6 @@ export interface IntakeSchedule {
   time: string;
   propose: boolean;
   review: boolean;
-  /** Propose news topics from new feed entries. */
-  feeds?: boolean;
 }
 /** What the scheduler last did for a project. */
 export interface IntakeState {

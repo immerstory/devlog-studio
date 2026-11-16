@@ -86,6 +86,11 @@ export async function migrate() {
   await applyMigration(3, async (c) => {
     await c.query("CREATE TABLE source_files (project_id text NOT NULL REFERENCES projects(id), id text NOT NULL, data jsonb NOT NULL, PRIMARY KEY (project_id, id))");
   });
+  // Proposing changes since the last check includes the feed entries, so a schedule that proposed from feeds proposes changes.
+  await applyMigration(4, async (c) => {
+    await c.query("UPDATE projects SET data = jsonb_set(data, '{settings,intake,propose}', 'true') WHERE data #>> '{settings,intake,feeds}' = 'true'");
+    await c.query("UPDATE projects SET data = data #- '{settings,intake,feeds}' WHERE data #> '{settings,intake}' ? 'feeds'");
+  });
 }
 
 export async function applyMigration(version: number, work: (c: pg.PoolClient) => Promise<void>) {

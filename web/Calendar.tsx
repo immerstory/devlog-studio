@@ -7,6 +7,7 @@ import { MaterialAttach } from "./Materials";
 import { sessionPeriod } from "./SessionImages";
 import { DayActivity, NewSuggestion, emptyDraft, type DayDraft } from "./GitDay";
 import { PopOutButton, PopOutDialog } from "./PopOut";
+import { JOB_FINISHED } from "./JobDock";
 import { CommitList } from "./CommitLinks";
 import { StoryFlow, storyRequestAround } from "./StoryDraft";
 import { SegTabs } from "@/components/seg-tabs";
@@ -451,32 +452,45 @@ function ProgressPanel({ state, reload, act }: { state: AppState; reload: () => 
     loadReview().catch(() => {});
     loadFeeds().catch(() => {});
   });
+  // Every visit starts by reading the sources, so the counts and proposals below work from current data.
+  const refresh = useJob(() => {
+    reload();
+    loadFeeds().catch(() => {});
+  });
+  useEffect(() => {
+    refresh.start("/api/activity/sync").catch(() => {});
+  }, []);
+  // A refresh or intake that runs elsewhere can add feed entries too.
+  useEffect(() => {
+    const finished = () => void loadFeeds().catch(() => {});
+    addEventListener(JOB_FINISHED, finished);
+    return () => removeEventListener(JOB_FINISHED, finished);
+  }, []);
+  const busy = job.running || refresh.running;
   const takenAt = Object.values(state.snapshot ?? {}).map((s) => s.takenAt).sort().at(-1);
   const lastCheck = takenAt ? new Date(takenAt).toLocaleString() : "never";
   return (
     <div className="discover">
       <div className="row">
         <div className="grow">
+          <strong>Refresh activity</strong>
+          <div className="muted small">Updates the app's record of the last 30 days from the sources: commits, connected activity, feed entries, materials from sources and screenshots. It calls no agent and proposes no topics. Runs each time this page opens.</div>
+        </div>
+        <Button variant="outline" disabled={refresh.running} onClick={() => act(() => refresh.start("/api/activity/sync"))}>{refresh.running ? "Refreshing…" : "Refresh activity"}</Button>
+      </div>
+      <div className="row">
+        <div className="grow">
           <strong>Check for progress</strong>
-          <div className="muted small">Last check: {lastCheck}. Reads new commits, uncommitted content files, new notes and new materials.</div>
+          <div className="muted small">Last check: {lastCheck}. The agent reads the work since then and proposes topics from it: commits, uncommitted content files, notes and materials.{feeds?.feeds ? ` It also proposes topics from each feed entry of the last seven days that has none yet, with one agent call per entry. ${feeds.waiting} entr${feeds.waiting === 1 ? "y is" : "ies are"} waiting.` : ""}</div>
         </div>
         <select value={agent} onChange={(e) => setAgent(e.target.value as "claude" | "codex")}>
           <option value="claude">Claude</option>
           <option value="codex">Codex</option>
         </select>
-        <Button disabled={job.running} onClick={() => act(() => job.start("/api/discover", { agent }))}>
+        <Button disabled={busy} onClick={() => act(() => job.start("/api/discover", { agent }))}>
           Propose changes since last check
         </Button>
       </div>
-      {feeds?.feeds ? (
-        <div className="row">
-          <div className="grow">
-            <strong>Propose from feeds</strong>
-            <div className="muted small">One agent run per feed entry of the last seven days that has no topics yet. {feeds.waiting} entr{feeds.waiting === 1 ? "y is" : "ies are"} waiting. Refresh activity reads new entries.</div>
-          </div>
-          <Button variant="outline" disabled={job.running || !feeds.waiting} onClick={() => act(() => job.start("/api/feeds/propose", { agent }))}>Propose from feeds</Button>
-        </div>
-      ) : null}
       <div className="row">
         <div className="grow">
           <strong>Backfill history</strong>
@@ -488,7 +502,7 @@ function ProgressPanel({ state, reload, act }: { state: AppState; reload: () => 
         <span>to</span>
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         <label className="check"><input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} /> re-run processed weeks</label>
-        <Button variant="outline" disabled={job.running || !from || !to} onClick={() => act(() => job.start("/api/backfill", { from, to, rerun, agent }))}>Backfill</Button>
+        <Button variant="outline" disabled={busy || !from || !to} onClick={() => act(() => job.start("/api/backfill", { from, to, rerun, agent }))}>Backfill</Button>
       </div>
       <div className="row">
         <div className="grow">
@@ -501,7 +515,7 @@ function ProgressPanel({ state, reload, act }: { state: AppState; reload: () => 
         <span>to</span>
         <input type="date" value={reviewTo} onChange={(e) => setReviewTo(e.target.value)} />
         <label className="check"><input type="checkbox" checked={reviewAgain} onChange={(e) => setReviewAgain(e.target.checked)} /> review weeks again</label>
-        <Button variant="outline" disabled={job.running || !reviewFrom || !reviewTo} onClick={() => act(() => job.start("/api/session-review", { from: reviewFrom, to: reviewTo, rerun: reviewAgain, agent }))}>Review</Button>
+        <Button variant="outline" disabled={busy || !reviewFrom || !reviewTo} onClick={() => act(() => job.start("/api/session-review", { from: reviewFrom, to: reviewTo, rerun: reviewAgain, agent }))}>Review</Button>
       </div>
     </div>
   );

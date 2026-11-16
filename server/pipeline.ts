@@ -322,6 +322,25 @@ function sessionFacts(r: ActivityRecord) {
 }
 
 /** One agent run per week with sessions. It adds topics and evidence, and it changes a suggestion's text only through a proposed edit. */
+/**
+ * Proposes topics from the work since the last check, then from the feed entries that have no topics yet.
+ * A failing step doesn't stop the other, and the error is raised at the end.
+ */
+export async function runProposals(log: Log, agent?: AgentKind, write = runAgent) {
+  const steps = [() => runDiscovery(log, agent, write)];
+  if (activeSources().some((s) => s.feedGlobs?.length)) steps.push(() => runFeedProposals(log, agent, write));
+  let failure: unknown;
+  for (const step of steps) {
+    throwIfCancelled();
+    try { await step(); } catch (err) {
+      if (err instanceof CancelledError) throw err;
+      log(`Failed: ${(err as Error).message}`);
+      failure ??= err;
+    }
+  }
+  if (failure) throw failure;
+}
+
 export async function runSessionReview(from: string, to: string, rerun: boolean, log: Log, agent?: AgentKind, write = runAgent) {
   const pid = projectId();
   const reviewed = new Set((await getValue<string[]>(pid, SESSION_REVIEWED)) ?? []);
