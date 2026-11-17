@@ -125,9 +125,17 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
       media.write("releases/broken/a.png", "a pixels");
       media.write("releases/broken/materials.json", "{");
       media.write("scratch/test.png", "test pixels");
+      const { createHash } = await import("node:crypto");
+      // A Git LFS file: the commit holds a pointer, and the content is in the repository's LFS folder once it is downloaded.
+      const lfs = (content: string) => {
+        const oid = createHash("sha256").update(content).digest("hex");
+        const object = path.join(media.dir, ".git", "lfs", "objects", oid.slice(0, 2), oid.slice(2, 4), oid);
+        return { pointer: `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`, download: (part = content) => { fs.mkdirSync(path.dirname(object), { recursive: true }); fs.writeFileSync(object, part); }, prune: () => fs.rmSync(object) };
+      };
       const lfsContent = "large pixels";
-      const lfsOid = (await import("node:crypto")).createHash("sha256").update(lfsContent).digest("hex");
-      media.write("releases/0.3/large.png", `version https://git-lfs.github.com/spec/v1\noid sha256:${lfsOid}\nsize ${lfsContent.length}\n`);
+      const large = lfs(lfsContent);
+      media.write("releases/0.3/large.png", large.pointer);
+      media.write("releases/0.3/cut.png", "version https://git-lfs.github.com/spec/v1\noid sha256:0123\nsize 1\n");
       media.commit("Add sets");
       const project = await createProject({ name: "Media", archetype: "game", sourcePath: game.dir });
       const removed: string[] = [];
@@ -151,8 +159,9 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           const [first, parallel] = await Promise.all([importSourceMaterials(() => {}, io), importSourceMaterials(() => {}, io)]);
           assert.deepEqual([first.added, first.skipped], [3, 1], "forest, lake and hut; old.png is excluded, sketch.png is a draft, a.png's folder is invalid, and twin.png has the content of lake.png, which comes first");
           assert.equal(parallel.added, 0, "a second import waits for the first, so nothing is stored twice");
-          assert.equal(first.errors.length, 1);
+          assert.equal(first.errors.length, 2);
           assert.match(first.errors[0], /releases\/broken\/materials\.json not valid JSON/);
+          assert.match(first.errors[1], /releases\/0\.3\/cut\.png is a Git LFS pointer that can't be read/, "a broken pointer is an error, because a download can't fix it");
           assert.equal(first.notices.length, 1, "a Git LFS file without downloaded content isn't an error");
           assert.match(first.notices[0], /1 matched file is in Git LFS, and its content isn't downloaded, such as releases\/0\.3\/large\.png/);
           let materials = await byPath();
@@ -166,13 +175,15 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
 
           const lines: string[] = [];
           assert.deepEqual(await importSourceMaterials((l) => lines.push(l), io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, inbox: 0, errors: first.errors, notices: first.notices }, "the Git LFS file waits for its content");
-          assert.ok(!lines.some((l) => /no new commits/.test(l)), "a source that waits for Git LFS content is read again, because a download doesn't change HEAD");
-          const lfsObject = path.join(media.dir, ".git", "lfs", "objects", lfsOid.slice(0, 2), lfsOid.slice(2, 4), lfsOid);
-          fs.mkdirSync(path.dirname(lfsObject), { recursive: true });
-          fs.writeFileSync(lfsObject, lfsContent.slice(0, 5));
-          assert.equal((await importSourceMaterials(() => {}, io)).notices.length, 1, "a partly downloaded object waits too");
-          fs.writeFileSync(lfsObject, lfsContent);
-          const pulled = await importSourceMaterials(() => {}, io);
+          assert.ok(lines.some((l) => /Media: no new commits or rule changes/.test(l)), "while nothing is downloaded, the source isn't read again");
+          large.download(lfsContent.slice(0, 5));
+          lines.length = 0;
+          assert.equal((await importSourceMaterials((l) => lines.push(l), io)).notices.length, 1, "a partly downloaded object waits too");
+          assert.ok(lines.some((l) => /no new commits/.test(l)));
+          large.download();
+          lines.length = 0;
+          const pulled = await importSourceMaterials((l) => lines.push(l), io);
+          assert.ok(!lines.some((l) => /no new commits/.test(l)), "a download that a held file waits for reads the source again, although HEAD is the same");
           assert.deepEqual([pulled.added, pulled.notices], [1, []], "downloaded Git LFS content is imported");
           assert.equal((await byPath()).get("releases/0.3/large.png")!.size, lfsContent.length, "the material holds the content, not the pointer");
           lines.length = 0;
@@ -240,7 +251,10 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal((await byPath()).get("releases/0.4/forest.png")!.origin!.removed, true, "a material that no longer matches a rule stays");
           await assert.rejects(saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "r", include: ["a"] }, { id: "r", include: ["b"] }] } : x)) }), /unique IDs/);
           const { addInboxFiles, inboxFileId, listInboxFiles, setInboxFileStatus } = await import("../server/sourceMaterials.js");
-          for (const name of ["a", "b", "c"]) media.write(`inbox/${name}.png`, `${name} pixels`);
+          for (const name of ["a", "b"]) media.write(`inbox/${name}.png`, `${name} pixels`);
+          const c = lfs("c pixels");
+          media.write("inbox/c.png", c.pointer);
+          c.download();
           media.commit("Add inbox files");
           const settings = getProject(project.id).settings;
           await saveProject(project.id, { ...settings, sources: settings.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "rule-2", include: ["inbox/**"], importTo: "inbox" as const }, ...rules] } : x)) });
@@ -253,7 +267,10 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal(await xmin(), before, "and their rows aren't written again");
           const id = (name: string) => inboxFileId("media", `inbox/${name}.png`);
           await setInboxFileStatus(id("b"), "dismissed");
-          const [added] = await addInboxFiles([id("a")], { title: "Mine" }, () => {}, io);
+          c.prune();
+          await assert.rejects(addInboxFiles([id("c"), id("a")], { title: "Mine" }, () => {}, io), /^Error: 1 of 2 files were added\. inbox\/c\.png has Git LFS content that isn't downloaded/, "a file that can't be stored is named, and the others are still added");
+          assert.equal((await listInboxFiles(project.id)).find((f) => f.path === "inbox/c.png")?.status, "inbox", "and it stays in the inbox");
+          const added = (await byPath()).get("inbox/a.png")!;
           assert.deepEqual([added.title, added.origin?.path, added.origin?.edited], ["Mine", "inbox/a.png", ["title"]], "a title given when adding counts as an edit");
           media.remove("inbox/c.png");
           media.commit("Remove c");
@@ -271,7 +288,7 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
             "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.2/hut.png": "deleted", "releases/0.3/large.png": "material", "releases/0.3/twin.png": "deleted",
           }, "forest.png's folder has an invalid metadata file, so the preview leaves it out too");
           assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 3, "rule-3": 0 });
-          assert.deepEqual([preview.errors.length, preview.notices], [2, []], "the invalid metadata files are reported");
+          assert.deepEqual([preview.errors.length, preview.notices], [3, []], "the invalid metadata files and the broken pointer are reported");
           assert.equal((await listInboxFiles(project.id)).length, 1, "a preview changes nothing");
           media.remove("inbox/d.png");
           media.commit("Remove d");
