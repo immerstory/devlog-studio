@@ -125,7 +125,9 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
       media.write("releases/broken/a.png", "a pixels");
       media.write("releases/broken/materials.json", "{");
       media.write("scratch/test.png", "test pixels");
-      media.write("releases/0.3/large.png", "version https://git-lfs.github.com/spec/v1\noid sha256:0123\nsize 99999\n");
+      const lfsContent = "large pixels";
+      const lfsOid = (await import("node:crypto")).createHash("sha256").update(lfsContent).digest("hex");
+      media.write("releases/0.3/large.png", `version https://git-lfs.github.com/spec/v1\noid sha256:${lfsOid}\nsize ${lfsContent.length}\n`);
       media.commit("Add sets");
       const project = await createProject({ name: "Media", archetype: "game", sourcePath: game.dir });
       const removed: string[] = [];
@@ -149,9 +151,10 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           const [first, parallel] = await Promise.all([importSourceMaterials(() => {}, io), importSourceMaterials(() => {}, io)]);
           assert.deepEqual([first.added, first.skipped], [3, 1], "forest, lake and hut; old.png is excluded, sketch.png is a draft, a.png's folder is invalid, and twin.png has the content of lake.png, which comes first");
           assert.equal(parallel.added, 0, "a second import waits for the first, so nothing is stored twice");
-          assert.equal(first.errors.length, 2);
+          assert.equal(first.errors.length, 1);
           assert.match(first.errors[0], /releases\/broken\/materials\.json not valid JSON/);
-          assert.match(first.errors[1], /1 matched file is a Git LFS pointer, such as releases\/0\.3\/large\.png/);
+          assert.equal(first.notices.length, 1, "a Git LFS file without downloaded content isn't an error");
+          assert.match(first.notices[0], /1 matched file is in Git LFS, and its content isn't downloaded, such as releases\/0\.3\/large\.png/);
           let materials = await byPath();
           assert.deepEqual([...materials.keys()].sort(), ["releases/0.2/hut.png", "releases/0.3/forest.png", "releases/0.3/lake.png"]);
           const forest = materials.get("releases/0.3/forest.png")!;
@@ -162,7 +165,18 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal(materials.get("releases/0.3/lake.png")!.title, "lake");
 
           const lines: string[] = [];
-          assert.deepEqual(await importSourceMaterials((l) => lines.push(l), io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, inbox: 0, errors: first.errors }, "unchanged files aren't stored again");
+          assert.deepEqual(await importSourceMaterials((l) => lines.push(l), io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, inbox: 0, errors: first.errors, notices: first.notices }, "the Git LFS file waits for its content");
+          assert.ok(!lines.some((l) => /no new commits/.test(l)), "a source that waits for Git LFS content is read again, because a download doesn't change HEAD");
+          const lfsObject = path.join(media.dir, ".git", "lfs", "objects", lfsOid.slice(0, 2), lfsOid.slice(2, 4), lfsOid);
+          fs.mkdirSync(path.dirname(lfsObject), { recursive: true });
+          fs.writeFileSync(lfsObject, lfsContent.slice(0, 5));
+          assert.equal((await importSourceMaterials(() => {}, io)).notices.length, 1, "a partly downloaded object waits too");
+          fs.writeFileSync(lfsObject, lfsContent);
+          const pulled = await importSourceMaterials(() => {}, io);
+          assert.deepEqual([pulled.added, pulled.notices], [1, []], "downloaded Git LFS content is imported");
+          assert.equal((await byPath()).get("releases/0.3/large.png")!.size, lfsContent.length, "the material holds the content, not the pointer");
+          lines.length = 0;
+          assert.deepEqual(await importSourceMaterials((l) => lines.push(l), io), { added: 0, updated: 0, moved: 0, removed: 0, skipped: 1, inbox: 0, errors: first.errors, notices: [] }, "unchanged files aren't stored again");
           assert.ok(lines.some((l) => /Media: no new commits or rule changes/.test(l)), "an unchanged source isn't scanned again");
 
           await store.saveMaterial(project.id, (await import("../server/sourceMaterials.js")).withEdits(forest, { ...forest, title: "My title" }));
@@ -221,7 +235,7 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           const current = getProject(project.id).settings;
           await saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [] } : x)) });
           assert.equal(getProject(project.id).settings.sources.find((x) => x.id === "media")!.materialRules, undefined, "an empty rule list is removed");
-          assert.equal((await importSourceMaterials(() => {}, io)).removed, 1, "without rules, the source's materials no longer match a rule");
+          assert.equal((await importSourceMaterials(() => {}, io)).removed, 2, "without rules, the source's materials no longer match a rule: forest.png and large.png");
           assert.ok((await deletedPaths()).includes("media:releases/0.3/twin.png"), "a source without rules keeps the deleted files that are still in it");
           assert.equal((await byPath()).get("releases/0.4/forest.png")!.origin!.removed, true, "a material that no longer matches a rule stays");
           await assert.rejects(saveProject(project.id, { ...current, sources: current.sources.map((x) => (x.id === "media" ? { ...x, materialRules: [{ id: "r", include: ["a"] }, { id: "r", include: ["b"] }] } : x)) }), /unique IDs/);
@@ -254,10 +268,10 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           media.commit("Add d");
           const preview = await previewRules("media", [{ id: "rule-2", include: ["inbox/**"], importTo: "inbox" }, ...rules, { id: "rule-3", include: ["nothing/**"] }]);
           assert.deepEqual(Object.fromEntries(preview.files.map((f) => [f.path, f.state])), {
-            "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.2/hut.png": "deleted", "releases/0.3/twin.png": "deleted",
+            "inbox/a.png": "material", "inbox/b.png": "dismissed", "inbox/d.png": "new-inbox", "releases/0.2/hut.png": "deleted", "releases/0.3/large.png": "material", "releases/0.3/twin.png": "deleted",
           }, "forest.png's folder has an invalid metadata file, so the preview leaves it out too");
-          assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 2, "rule-3": 0 });
-          assert.equal(preview.errors.length, 3, "the invalid metadata files and the Git LFS pointer are reported");
+          assert.deepEqual(preview.matchesPerRule, { "rule-2": 3, "rule-1": 3, "rule-3": 0 });
+          assert.deepEqual([preview.errors.length, preview.notices], [2, []], "the invalid metadata files are reported");
           assert.equal((await listInboxFiles(project.id)).length, 1, "a preview changes nothing");
           media.remove("inbox/d.png");
           media.commit("Remove d");

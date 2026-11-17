@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeFile, parseMetadata, patternValues, ruleMatches, withEdits } from "../server/sourceMaterials.js";
+import { describeFile, parseLfsPointer, parseMetadata, patternValues, ruleMatches, withEdits } from "../server/sourceMaterials.js";
 import { readMaterialRules, type MaterialRule } from "../shared/projects.js";
 import { matchesOrigin, type Material } from "../shared/types.js";
 
@@ -105,4 +105,12 @@ test("a progress check takes imported materials of its own days only, and a run 
   const last = many.at(-1)!.id;
   assert.ok(limitImported(many, new Set([last])).some((m) => m.id === last), "a material attached to a suggestion or a post is never left out");
   assert.equal(limitImported(many, new Set([last])).length, IMPORTED_PER_RUN + 1);
+});
+
+test("a Git LFS pointer gives the ID and size of its content", () => {
+  const oid = "a".repeat(64);
+  assert.deepEqual(parseLfsPointer(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 1234\n`), { oid, size: 1234 });
+  assert.equal(parseLfsPointer("version https://git-lfs.github.com/spec/v1\noid sha256:0123\nsize 1\n"), undefined, "an ID that isn't a SHA-256 hash");
+  assert.equal(parseLfsPointer(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\n`), undefined, "no size");
+  assert.equal(parseLfsPointer("forest pixels"), undefined, "other content");
 });
