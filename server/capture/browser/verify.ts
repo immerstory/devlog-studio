@@ -2,6 +2,7 @@ import puppeteer, { type HTTPResponse, type Page } from "puppeteer-core";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { blockedReason, chromePath, PHONE_AGENT } from "./render.js";
 import { blockAds } from "./ads.js";
+import { isReplacedPage, REPLACED_PAGE, ReplacedPageError, retryReplacedPage } from "./replaced-page.js";
 
 /** Text as a reader sees it: case, spacing, dashes and the kind of quote mark don't matter, since articles and their quotes often differ there. */
 export const readable = (text: string) =>
@@ -204,8 +205,26 @@ ${text}`).includes(readable(highlight)) : undefined;
   return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}) };
 }
 
-/** Opens a page only to check it, without filming. A page that doesn't load is a failed check, not an error. */
-export async function checkPage(url: string, shot: Pick<PageShot, "credit" | "expect" | "highlight">, opts: { userAgent?: string; headers?: Record<string, string>; device?: PageDevice } = {}): Promise<PageCheck> {
+interface CheckPageOptions { userAgent?: string; headers?: Record<string, string>; device?: PageDevice; log?: (line: string) => void }
+
+/**
+ * Opens a page only to check it, without filming. A page that doesn't load is a failed check, not an error. A browser
+ * that doesn't start is an error, because it says nothing about the page.
+ */
+export async function checkPage(url: string, shot: Pick<PageShot, "credit" | "expect" | "highlight">, opts: CheckPageOptions = {}): Promise<PageCheck> {
+  try {
+    return await retryReplacedPage(() => checkPageOnce(url, shot, opts), opts.log ?? (() => {}));
+  } catch (err) {
+    if (err instanceof ReplacedPageError) return failedCheck(url, shot, REPLACED_PAGE);
+    throw err;
+  }
+}
+
+const failedCheck = (url: string, shot: Pick<PageShot, "expect">, problem: string): PageCheck =>
+  ({ url, checkedAt: new Date().toISOString(), ok: false, problem, ...(shot.expect?.trim() ? { expect: shot.expect.trim() } : {}) });
+
+/** One attempt at checkPage. A page that replaced itself throws, so it can be opened again. */
+async function checkPageOnce(url: string, shot: Pick<PageShot, "credit" | "expect" | "highlight">, opts: CheckPageOptions): Promise<PageCheck> {
   const browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio"] });
   try {
     const page = await browser.newPage();
@@ -228,7 +247,8 @@ export async function checkPage(url: string, shot: Pick<PageShot, "credit" | "ex
     const paywall = await coveringPaywall(page).catch(() => undefined);
     return paywall ? { ...check, ok: false, problem: `A paywall covers the page (“${paywall}…”). Show this source on a slide instead.` } : check;
   } catch (err) {
-    return { url, checkedAt: new Date().toISOString(), ok: false, problem: `The page didn't load: ${(err as Error).message}`, ...(shot.expect?.trim() ? { expect: shot.expect.trim() } : {}) };
+    if (isReplacedPage(err)) throw err;
+    return failedCheck(url, shot, `The page didn't load: ${(err as Error).message}`);
   } finally {
     await browser.close().catch(() => {});
   }

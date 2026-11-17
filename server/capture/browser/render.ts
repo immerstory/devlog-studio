@@ -8,6 +8,7 @@ import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { coveringDialog, coveringPaywall, hideNotices, inspectPage, refuseConsent } from "./verify.js";
 import { highlightScript } from "./highlight.js";
 import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
+import { isReplacedPage, retryReplacedPage, SCRIPT_LEFT_PAGE, ScriptError } from "./replaced-page.js";
 
 /** The Chrome build this version of Puppeteer is made for. */
 const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
@@ -94,13 +95,20 @@ export interface PageSession {
  * frame, however long a screenshot takes. Lazy-loaded content still loads: page time waits for pending
  * network requests.
  */
-export async function openPage(opts: { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void }): Promise<PageSession> {
+export function openPage(opts: OpenPageOptions): Promise<PageSession> {
+  return retryReplacedPage(() => openPageOnce(opts), opts.log);
+}
+
+type OpenPageOptions = { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void };
+
+async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
   const orientation = opts.output.height > opts.output.width ? "portrait" : "landscape";
   const width = VIEWPORT_WIDTH[opts.device][orientation];
   // Rounded up, so the clip of the exact output size always fits inside the viewport.
   const height = Math.ceil((width * opts.output.height) / opts.output.width);
   const scale = opts.output.width / width;
   let browser: Browser | undefined;
+  let scriptRan = false;
   try {
     browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio", "--autoplay-policy=no-user-gesture-required"] });
     const page = await browser.newPage();
@@ -152,10 +160,11 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
     for (const custom of opts.css ?? []) if (custom.trim()) await page.addStyleTag({ content: custom });
     // The shot's own script runs as a function body; an error in it fails the shot with its message.
     if (opts.script?.trim()) {
+      scriptRan = true;
       try {
         await page.evaluate(`(async () => {\n${opts.script}\n})()`);
       } catch (err) {
-        throw new Error(`The shot's script failed: ${(err as Error).message.split("\n")[0]}`);
+        throw new ScriptError(isReplacedPage(err) ? SCRIPT_LEFT_PAGE : `The shot's script failed: ${(err as Error).message.split("\n")[0]}`);
       }
     }
     await new Promise((r) => setTimeout(r, Math.max(0, opts.settleMs)));
@@ -305,6 +314,7 @@ export async function openPage(opts: { url: string; device: PageDevice; output: 
     };
   } catch (err) {
     await browser?.close().catch(() => {});
-    throw err;
+    // After a shot's script ran, a page that is gone counts as the script leaving it, so it isn't opened again.
+    throw scriptRan && isReplacedPage(err) ? new ScriptError(SCRIPT_LEFT_PAGE) : err;
   }
 }
