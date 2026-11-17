@@ -124,9 +124,83 @@ export function writeOutput(child: ChildProcess, file: string, what: string): Pr
   return Promise.all([exited, written]).then(([code]) => { if (code !== 0) throw new Error(`${what} failed: ${err.trim()}`); });
 }
 
-/** Writes a blob to a file without holding it in memory. */
-const writeBlob = (cwd: string, blob: string, file: string) =>
-  writeOutput(spawn("git", [...READ_ONLY, "cat-file", "blob", blob], { cwd, windowsHide: true }), file, "git cat-file");
+/** A Git LFS pointer is a small text file that a commit holds in place of the content. */
+const LFS_POINTER = "version https://git-lfs";
+/** Blobs at least this large aren't read as pointers: a pointer holds about 130 bytes. */
+const LFS_POINTER_MAX = 1024;
+export interface LfsPointer { oid: string; size: number }
+
+/** The content's ID and size in a Git LFS pointer, or undefined for other content and pointers that can't be read. */
+export function parseLfsPointer(text: string): LfsPointer | undefined {
+  if (!text.startsWith(LFS_POINTER)) return undefined;
+  const oid = /^oid sha256:([0-9a-f]{64})$/m.exec(text)?.[1];
+  const size = /^size (\d+)$/m.exec(text)?.[1];
+  return oid && size ? { oid, size: Number(size) } : undefined;
+}
+
+/**
+ * The Git folder from `git rev-parse --path-format=absolute --git-common-dir`. Git before 2.31 doesn't know the option
+ * and prints it back as a line of its own, which would make every Git LFS file count as not downloaded.
+ */
+export function absoluteGitDir(output: string): string {
+  const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length !== 1 || !path.isAbsolute(lines[0])) throw new Error("Reading Git LFS files needs Git 2.31 or later. Update Git, then check the sources again.");
+  return lines[0];
+}
+
+/**
+ * The folder where Git LFS keeps the downloaded content of a repository. The Git folder is asked for as an absolute
+ * path, because a relative one depends on the Git version and on where the source is in its repository. A relative
+ * lfs.storage is relative to the Git folder.
+ */
+async function lfsStore(cwd: string): Promise<string> {
+  const gitDir = absoluteGitDir(await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const storage = (await git(cwd, ["config", "--get", "lfs.storage"]).catch(() => "")).trim();
+  return storage ? path.resolve(gitDir, storage) : path.join(gitDir, "lfs");
+}
+
+/** A downloaded Git LFS object: its file, and the size the pointer gives. */
+interface LfsObject { file: string; size: number }
+/** True when the object is downloaded. A file of another size is incomplete. */
+const isDownloaded = (object: LfsObject) => fs.promises.stat(object.file).then((st) => st.size === object.size, () => false);
+
+/**
+ * Where a blob's content is: in Git, or in the Git LFS folder for a pointer. A pointer that can't be read is invalid.
+ * The match and the writer of a file both use this, so they agree on which files can be stored.
+ */
+type BlobContent = { at: "git" } | { at: "lfs"; object: LfsObject; downloaded: boolean } | { at: "invalid-pointer" };
+async function blobContent(cwd: string, blob: string, size: number, store: () => Promise<string>): Promise<BlobContent> {
+  if (size >= LFS_POINTER_MAX) return { at: "git" };
+  const text = await git(cwd, ["cat-file", "blob", blob]);
+  if (!text.startsWith(LFS_POINTER)) return { at: "git" };
+  const pointer = parseLfsPointer(text);
+  if (!pointer) return { at: "invalid-pointer" };
+  const object = { file: path.join(await store(), "objects", pointer.oid.slice(0, 2), pointer.oid.slice(2, 4), pointer.oid), size: pointer.size };
+  return { at: "lfs", object, downloaded: await isDownloaded(object) };
+}
+/** The Git LFS folder of a source, looked up once and only when a pointer needs it. */
+const lazyStore = (cwd: string) => {
+  let store: Promise<string> | undefined;
+  return () => (store ??= lfsStore(cwd));
+};
+
+/** An error message that names the file once: messages about a file's content start with its path. */
+const aboutFile = (file: string, err: unknown) => {
+  const message = (err as Error).message;
+  return message.startsWith(`${file} `) ? message : `${file}: ${message}`;
+};
+
+const INVALID_POINTER = "is a Git LFS pointer that can't be read. Commit the file again with Git LFS.";
+const NOT_DOWNLOADED = "has Git LFS content that isn't downloaded. Run git lfs pull in the source's folder.";
+
+/** Writes a file's committed content to a file without holding it in memory. For a Git LFS pointer, it copies the downloaded content. */
+async function writeBlob(cwd: string, file: Pick<MatchedFile, "path" | "blob">, target: string) {
+  const content = await blobContent(cwd, file.blob, Number((await git(cwd, ["cat-file", "-s", file.blob])).trim()), lazyStore(cwd));
+  if (content.at === "git") return writeOutput(spawn("git", [...READ_ONLY, "cat-file", "blob", file.blob], { cwd, windowsHide: true }), target, "git cat-file");
+  if (content.at === "invalid-pointer") throw new Error(`${file.path} ${INVALID_POINTER}`);
+  if (!content.downloaded) throw new Error(`${file.path} ${NOT_DOWNLOADED}`);
+  await fs.promises.copyFile(content.object.file, target);
+}
 
 interface TreeFile { blob: string; size: number }
 /** Committed files of a source, with their blobs and sizes. */
@@ -170,9 +244,6 @@ function commitDates() {
   };
 }
 
-/** A Git LFS pointer is a small text file in place of the content. */
-const LFS_POINTER = "version https://git-lfs";
-
 /** One file a rule matches, as the import and the preview see it. */
 export interface MatchedFile {
   sourceId: string;
@@ -187,18 +258,23 @@ export interface SourceMatch {
   files: MatchedFile[];
   /** Every committed path, so a moved file can be told from a copy. */
   paths: Set<string>;
-  /** Files a rule matches that this run leaves alone: those in a folder with an invalid metadata file, and Git LFS pointers. */
+  /** Files a rule matches that this run leaves alone: those in a folder with an invalid metadata file, invalid Git LFS pointers and Git LFS files that aren't downloaded. */
   held: string[];
   errors: string[];
+  /** What the developer can do to import held files, such as downloading Git LFS content. They don't fail an import. */
+  notices: string[];
+  /** The Git LFS objects of held files that aren't downloaded yet. A download doesn't change HEAD, so a later import checks them. */
+  waiting: LfsObject[];
 }
 
 /** The files the rules of one source import, with their resolved fields. Problems in metadata files skip their folder. */
 export async function matchSourceFiles(source: Source, log: (line: string) => void = () => {}): Promise<SourceMatch> {
   const rules = source.materialRules ?? [];
   const errors: string[] = [];
+  const notices: string[] = [];
   // The paths are read even without rules: they tell which deleted and dismissed files are still in the source.
   const tree = await committedFiles(source);
-  if (!rules.some((r) => r.include.length)) return { files: [], paths: new Set(tree.keys()), held: [], errors };
+  if (!rules.some((r) => r.include.length)) return { files: [], paths: new Set(tree.keys()), held: [], errors, notices, waiting: [] };
   // A metadata file per folder: undefined when there is none, null when it is invalid, which skips the folder.
   const metadata = new Map<string, FolderMetadata | null | undefined>();
   const readMetadata = async (rule: MaterialRule, folder: string): Promise<FolderMetadata | null | undefined> => {
@@ -221,7 +297,10 @@ export async function matchSourceFiles(source: Source, log: (line: string) => vo
     return metadata.get(file);
   };
   const held: string[] = [];
-  const pointers: string[] = [];
+  const notDownloaded: string[] = [];
+  const invalidPointers: string[] = [];
+  const waiting: LfsObject[] = [];
+  const store = lazyStore(source.path);
   const pending: Array<{ rule: MaterialRule; filePath: string; blob: string; described: Described }> = [];
   for (const [filePath, entry] of [...tree].sort(([a], [b]) => a.localeCompare(b))) {
     const rule = rules.find((r) => ruleMatches(r, filePath));
@@ -230,16 +309,20 @@ export async function matchSourceFiles(source: Source, log: (line: string) => vo
     if (meta === null) { held.push(filePath); continue; }
     const described = describeFile(rule, filePath, meta);
     if (!described) continue;
-    if (entry.size < 1024 && (await git(source.path, ["cat-file", "blob", entry.blob])).startsWith(LFS_POINTER)) {
-      held.push(filePath);
-      pointers.push(filePath);
-      continue;
-    }
+    // A Git LFS file is imported from the content that Git LFS downloaded. The pointer's blob identifies that content.
+    const content = await blobContent(source.path, entry.blob, entry.size, store);
+    if (content.at === "invalid-pointer") { held.push(filePath); invalidPointers.push(filePath); continue; }
+    if (content.at === "lfs" && !content.downloaded) { held.push(filePath); notDownloaded.push(filePath); waiting.push(content.object); continue; }
     pending.push({ rule, filePath, blob: entry.blob, described });
   }
-  if (pointers.length) {
-    errors.push(`${source.label}: ${pointers.length} matched file${pointers.length === 1 ? " is a Git LFS pointer" : "s are Git LFS pointers"}, such as ${pointers[0]}. The import reads committed content only, so it leaves them out.`);
+  for (const file of invalidPointers) {
+    errors.push(`${source.label}: ${file} ${INVALID_POINTER}`);
     log(errors.at(-1)!);
+  }
+  if (notDownloaded.length) {
+    const n = notDownloaded.length;
+    notices.push(`${source.label}: ${n} matched file${n === 1 ? " is" : "s are"} in Git LFS, and ${n === 1 ? "its" : "their"} content isn't downloaded, such as ${notDownloaded[0]}. Run git lfs pull in the source's folder, and the next import adds ${n === 1 ? "it" : "them"}.`);
+    log(notices.at(-1)!);
   }
   const lookUp = commitDates();
   const dated = await Promise.all(pending.map(async (p) => {
@@ -254,7 +337,7 @@ export async function matchSourceFiles(source: Source, log: (line: string) => vo
     const date = d.date ?? (at ? localDate(at) : localDate(new Date()));
     return { sourceId: source.id, ruleId: d.rule.id, path: d.filePath, blob: d.blob, fields: { ...d.described.fields, date }, dateFrom: d.dateFrom };
   });
-  return { files, paths: new Set(tree.keys()), held, errors };
+  return { files, paths: new Set(tree.keys()), held, errors, notices, waiting };
 }
 
 /**
@@ -266,7 +349,9 @@ async function matchOnce(pid: string, source: Source, log: (line: string) => voi
   const heads = await Promise.all(activeSources().map(async (s) => `${s.id}:${(await git(s.path, ["rev-parse", "--verify", "-q", "HEAD"]).catch(() => "")).trim()}`));
   const key = JSON.stringify([pid, source.path, source.materialRules ?? [], heads]);
   const last = lastMatches.get(source.id);
-  if (last?.key === key) {
+  // Only the Git LFS objects that a held file waits for are checked again, not the whole source.
+  const downloaded = last?.key === key && (await Promise.all(last.match.waiting.map(isDownloaded))).some(Boolean);
+  if (last?.key === key && !downloaded) {
     log(`${source.label}: no new commits or rule changes since the last import.`);
     return last.match;
   }
@@ -281,7 +366,7 @@ export interface ImportIO {
 }
 const storageIO: ImportIO = { ingest: ingestFile, removeFiles: deletePrefix };
 
-export interface ImportResult { added: number; updated: number; moved: number; removed: number; skipped: number; inbox: number; errors: string[] }
+export interface ImportResult { added: number; updated: number; moved: number; removed: number; skipped: number; inbox: number; errors: string[]; notices: string[] }
 
 /** The fields from the source, except those the developer edited, which keep their stored value. */
 const merged = (m: Material, fields: MaterialFields): Material => {
@@ -315,7 +400,7 @@ async function storeFile(source: Source, file: Pick<MatchedFile, "ruleId" | "pat
   const tmp = path.join(CACHE_DIR, "uploads", "incoming", `${newId("src")}${path.extname(file.path)}`);
   fs.mkdirSync(path.dirname(tmp), { recursive: true });
   try {
-    await writeBlob(source.path, file.blob, tmp);
+    await writeBlob(source.path, file, tmp);
     const version = file.blob.slice(0, 12);
     if (!existing) return await io.ingest(tmp, path.posix.basename(file.path), { ...file.fields, ...edits?.fields, origin }, { version });
     const stored = await io.ingest(tmp, path.posix.basename(file.path), { ...file.fields, origin }, { id: existing.id, createdAt: existing.createdAt, version, save: false });
@@ -371,7 +456,7 @@ export function importSourceMaterials(log: (line: string) => void = () => {}, io
 }
 
 async function runImport(pid: string, log: (line: string) => void, io: ImportIO): Promise<ImportResult> {
-  const result: ImportResult = { added: 0, updated: 0, moved: 0, removed: 0, skipped: 0, inbox: 0, errors: [] };
+  const result: ImportResult = { added: 0, updated: 0, moved: 0, removed: 0, skipped: 0, inbox: 0, errors: [], notices: [] };
   const imported = (await listMaterials(pid)).filter((m) => m.origin);
   const waiting = await inboxRows(pid);
   const sources = activeSources().filter((s) => s.materialRules?.some((r) => r.include.length) || imported.some((m) => m.origin!.sourceId === s.id) || waiting.some((f) => f.sourceId === s.id));
@@ -385,6 +470,7 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
     try {
       match = await matchOnce(pid, source, log);
       result.errors.push(...match.errors);
+      result.notices.push(...match.notices);
     } catch (err) {
       const message = `${source.label}: ${(err as Error).message}`;
       result.errors.push(message);
@@ -458,7 +544,7 @@ async function runImport(pid: string, log: (line: string) => void, io: ImportIO)
         byPath.set(key, stored);
         blobs.set(file.blob, key);
       } catch (err) {
-        const message = `${source.label}: ${file.path}: ${(err as Error).message}`;
+        const message = `${source.label}: ${aboutFile(file.path, err)}`;
         result.errors.push(message);
         log(message);
       }
@@ -501,7 +587,7 @@ export async function inboxFilePath(id: string): Promise<{ file: string; blob: s
     fs.mkdirSync(dir, { recursive: true });
     const tmp = `${local}.${newId("part")}`;
     try {
-      await writeBlob(source.path, file.blob, tmp);
+      await writeBlob(source.path, file, tmp);
       fs.renameSync(tmp, local);
     } finally {
       fs.rmSync(tmp, { force: true });
@@ -529,16 +615,25 @@ export function addInboxFiles(ids: string[], fields: Partial<InboxFile["fields"]
   const pid = projectId();
   return oneImportAtATime(pid, async () => {
     const added: Material[] = [];
+    const failed: string[] = [];
     for (const id of ids) {
       throwIfCancelled();
       const { file, source } = await loadInboxFile(pid, id);
       const edited = ORIGIN_FIELDS.filter((f) => f in fields && JSON.stringify(fields[f] ?? null) !== JSON.stringify(file.fields[f] ?? null));
-      const material = await storeFile(source, file, undefined, io, log, { fields: Object.fromEntries(edited.map((f) => [f, fields[f]])), edited });
+      let material: Material | undefined;
+      // A file that can't be stored stays in the inbox, and the other files are still added.
+      try { material = await storeFile(source, file, undefined, io, log, { fields: Object.fromEntries(edited.map((f) => [f, fields[f]])), edited }); }
+      catch (err) {
+        failed.push(aboutFile(file.path, err));
+        log(failed.at(-1)!);
+        continue;
+      }
       await deleteInboxFile(pid, id);
       fs.rmSync(path.join(CACHE_DIR, "source-files", `${file.blob}${path.posix.extname(file.path).toLowerCase()}`), { force: true });
       log(`Added ${file.path}.`);
       if (material) added.push(material);
     }
+    if (failed.length) throw new Error(`${added.length} of ${ids.length} files were added. ${failed.join(" ")}`);
     return added;
   });
 }
@@ -575,7 +670,7 @@ export async function previewRules(sourceId: string, rules: MaterialRule[], log:
     return { path: file.path, ruleId: file.ruleId, fields: file.fields, dateFrom: file.dateFrom, state };
   });
   log(`${files.length} file(s) match.`);
-  return { total: files.length, files: files.slice(0, PREVIEW_LIMIT), matchesPerRule, errors: found.errors };
+  return { total: files.length, files: files.slice(0, PREVIEW_LIMIT), matchesPerRule, errors: found.errors, notices: found.notices };
 }
 
 /** Lets the next import bring back deleted files of a source. Returns how many were on the deleted list. */

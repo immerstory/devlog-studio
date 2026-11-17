@@ -190,7 +190,8 @@ export type DateFrom = "metadata" | "commit" | "first-commit";
 /** What the import would do with a file: add it to the materials or the inbox, keep it there, update or move its material, or leave it out. */
 export type PreviewState = "new" | "new-inbox" | "inbox" | "material" | "moved" | "dismissed" | "deleted" | "duplicate";
 export interface PreviewFile { path: string; ruleId: string; fields: InboxFile["fields"]; dateFrom: DateFrom; state: PreviewState }
-export interface RulePreview { total: number; files: PreviewFile[]; matchesPerRule: Record<string, number>; errors: string[] }
+/** Errors are problems to fix in the source. Notices say what to do so held files import, such as downloading Git LFS content. */
+export interface RulePreview { total: number; files: PreviewFile[]; matchesPerRule: Record<string, number>; errors: string[]; notices: string[] }
 
 export interface MaterialDeletion { deleted: true; warning?: string }
 

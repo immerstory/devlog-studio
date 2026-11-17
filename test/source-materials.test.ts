@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeFile, parseMetadata, patternValues, ruleMatches, withEdits } from "../server/sourceMaterials.js";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { absoluteGitDir, describeFile, matchSourceFiles, parseLfsPointer, parseMetadata, patternValues, ruleMatches, withEdits } from "../server/sourceMaterials.js";
 import { readMaterialRules, type MaterialRule } from "../shared/projects.js";
 import { matchesOrigin, type Material } from "../shared/types.js";
 
@@ -105,4 +110,42 @@ test("a progress check takes imported materials of its own days only, and a run 
   const last = many.at(-1)!.id;
   assert.ok(limitImported(many, new Set([last])).some((m) => m.id === last), "a material attached to a suggestion or a post is never left out");
   assert.equal(limitImported(many, new Set([last])).length, IMPORTED_PER_RUN + 1);
+});
+
+test("a Git LFS pointer gives the ID and size of its content", () => {
+  const oid = "a".repeat(64);
+  assert.deepEqual(parseLfsPointer(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 1234\n`), { oid, size: 1234 });
+  assert.equal(parseLfsPointer("version https://git-lfs.github.com/spec/v1\noid sha256:0123\nsize 1\n"), undefined, "an ID that isn't a SHA-256 hash");
+  assert.equal(parseLfsPointer(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\n`), undefined, "no size");
+  assert.equal(parseLfsPointer("forest pixels"), undefined, "other content");
+});
+
+test("a source in a subfolder of its repository finds the repository's Git LFS content", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "devlog-lfs-"));
+  try {
+    const sh = (args: string[]) => execFileSync("git", args, { cwd: root, windowsHide: true });
+    sh(["init", "-q"]); sh(["config", "user.email", "test@example.com"]); sh(["config", "user.name", "Test"]);
+    const content = "shot pixels";
+    const oid = createHash("sha256").update(content).digest("hex");
+    fs.mkdirSync(path.join(root, "media/shots"), { recursive: true });
+    fs.writeFileSync(path.join(root, "media/shots/a.png"), `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`);
+    sh(["add", "-A"]); sh(["commit", "-q", "-m", "Add shot"]);
+    const source = { id: "media", label: "Media", path: path.join(root, "media"), contentGlobs: [], materialRules: [{ id: "r", include: ["shots/**"], metadataFile: "" }] };
+    const waiting = await matchSourceFiles(source);
+    assert.deepEqual([waiting.files.length, waiting.held, waiting.notices.length, waiting.errors], [0, ["shots/a.png"], 1, []]);
+    const object = path.join(root, ".git/lfs/objects", oid.slice(0, 2), oid.slice(2, 4), oid);
+    fs.mkdirSync(path.dirname(object), { recursive: true });
+    fs.writeFileSync(object, content);
+    const found = await matchSourceFiles(source);
+    assert.deepEqual([found.files.map((f) => f.path), found.held, found.notices], [["shots/a.png"], [], []]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the Git folder must be one absolute path, which Git before 2.31 doesn't give", () => {
+  const gitDir = path.join(os.tmpdir(), "repo", ".git");
+  assert.equal(absoluteGitDir(`${gitDir}\n`), gitDir);
+  assert.throws(() => absoluteGitDir("--path-format=absolute\n.git\n"), /needs Git 2\.31 or later/, "an older Git prints the option back");
+  assert.throws(() => absoluteGitDir(".git\n"), /needs Git 2\.31 or later/);
 });

@@ -45,6 +45,7 @@ function PreviewDialog({ sourceId, preview, rules, onClose }: { sourceId: string
           </DialogDescription>
         </DialogHeader>
         {preview.errors.map((e) => <div key={e} className="error small">{e}</div>)}
+        {preview.notices.map((n) => <div key={n} className="muted small">{n}</div>)}
         {err ? <div className="error small">{err}</div> : null}
         {deleted.length || again.size ? (
           <div className="row">
