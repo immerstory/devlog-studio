@@ -139,12 +139,22 @@ export function parseLfsPointer(text: string): LfsPointer | undefined {
 }
 
 /**
+ * The Git folder from `git rev-parse --path-format=absolute --git-common-dir`. Git before 2.31 doesn't know the option
+ * and prints it back as a line of its own, which would make every Git LFS file count as not downloaded.
+ */
+export function absoluteGitDir(output: string): string {
+  const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length !== 1 || !path.isAbsolute(lines[0])) throw new Error("Reading Git LFS files needs Git 2.31 or later. Update Git, then check the sources again.");
+  return lines[0];
+}
+
+/**
  * The folder where Git LFS keeps the downloaded content of a repository. The Git folder is asked for as an absolute
  * path, because a relative one depends on the Git version and on where the source is in its repository. A relative
  * lfs.storage is relative to the Git folder.
  */
 async function lfsStore(cwd: string): Promise<string> {
-  const gitDir = (await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim();
+  const gitDir = absoluteGitDir(await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   const storage = (await git(cwd, ["config", "--get", "lfs.storage"]).catch(() => "")).trim();
   return storage ? path.resolve(gitDir, storage) : path.join(gitDir, "lfs");
 }

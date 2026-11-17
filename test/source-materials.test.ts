@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describeFile, matchSourceFiles, parseLfsPointer, parseMetadata, patternValues, ruleMatches, withEdits } from "../server/sourceMaterials.js";
+import { absoluteGitDir, describeFile, matchSourceFiles, parseLfsPointer, parseMetadata, patternValues, ruleMatches, withEdits } from "../server/sourceMaterials.js";
 import { readMaterialRules, type MaterialRule } from "../shared/projects.js";
 import { matchesOrigin, type Material } from "../shared/types.js";
 
@@ -141,4 +141,11 @@ test("a source in a subfolder of its repository finds the repository's Git LFS c
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the Git folder must be one absolute path, which Git before 2.31 doesn't give", () => {
+  const gitDir = path.join(os.tmpdir(), "repo", ".git");
+  assert.equal(absoluteGitDir(`${gitDir}\n`), gitDir);
+  assert.throws(() => absoluteGitDir("--path-format=absolute\n.git\n"), /needs Git 2\.31 or later/, "an older Git prints the option back");
+  assert.throws(() => absoluteGitDir(".git\n"), /needs Git 2\.31 or later/);
 });

@@ -24,7 +24,7 @@ Each project has a type: game, web app, mobile app, industry news or something e
 
 ## Requirements
 
-- Node.js 22 and ffmpeg/ffprobe on `PATH`
+- Node.js 22, Git 2.31 or later, and ffmpeg/ffprobe on `PATH`
 - Internet access for the first webpage shot, which downloads Chrome headless shell into `cache/chrome`
 - Docker with Compose, for Postgres and Garage
 - `claude` (Claude Code) or `codex` CLI, signed in
