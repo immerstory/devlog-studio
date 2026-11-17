@@ -59,7 +59,7 @@ export async function checkPostLinks(post: Post, format: keyof Post["scripts"], 
   for (const s of shots) {
     throwIfCancelled();
     log(`Segment ${s.index + 1}: ${s.url}`);
-    const check = await checkPage(s.url, s.shot, { userAgent: s.target.userAgent, headers: parseHeaders(s.target.headers ?? DEFAULT_PAGE_HEADERS), device: s.device });
+    const check = await checkPage(s.url, s.shot, { userAgent: s.target.userAgent, headers: parseHeaders(s.target.headers ?? DEFAULT_PAGE_HEADERS), device: s.device, log: (line) => log(`  ${line}`) });
     await savePageCheck(check);
     if (check.ok) log(`  OK${check.title ? `: “${check.title}”` : ""}`);
     else { failed++; log(`  ${check.problem}`); }

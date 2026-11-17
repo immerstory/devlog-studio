@@ -8,7 +8,7 @@ import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { coveringDialog, coveringPaywall, hideNotices, inspectPage, refuseConsent } from "./verify.js";
 import { highlightScript } from "./highlight.js";
 import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
-import { retryReplacedPage, SCRIPT_FAILED } from "./replaced-page.js";
+import { isReplacedPage, retryReplacedPage, SCRIPT_LEFT_PAGE, ScriptError } from "./replaced-page.js";
 
 /** The Chrome build this version of Puppeteer is made for. */
 const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
@@ -108,6 +108,7 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
   const height = Math.ceil((width * opts.output.height) / opts.output.width);
   const scale = opts.output.width / width;
   let browser: Browser | undefined;
+  let scriptRan = false;
   try {
     browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio", "--autoplay-policy=no-user-gesture-required"] });
     const page = await browser.newPage();
@@ -159,10 +160,11 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     for (const custom of opts.css ?? []) if (custom.trim()) await page.addStyleTag({ content: custom });
     // The shot's own script runs as a function body; an error in it fails the shot with its message.
     if (opts.script?.trim()) {
+      scriptRan = true;
       try {
         await page.evaluate(`(async () => {\n${opts.script}\n})()`);
       } catch (err) {
-        throw new Error(`${SCRIPT_FAILED}${(err as Error).message.split("\n")[0]}`);
+        throw new ScriptError(isReplacedPage(err) ? SCRIPT_LEFT_PAGE : `The shot's script failed: ${(err as Error).message.split("\n")[0]}`);
       }
     }
     await new Promise((r) => setTimeout(r, Math.max(0, opts.settleMs)));
@@ -312,6 +314,7 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     };
   } catch (err) {
     await browser?.close().catch(() => {});
-    throw err;
+    // After a shot's script ran, a page that is gone counts as the script leaving it, so it isn't opened again.
+    throw scriptRan && isReplacedPage(err) ? new ScriptError(SCRIPT_LEFT_PAGE) : err;
   }
 }
