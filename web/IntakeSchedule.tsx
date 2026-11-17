@@ -36,13 +36,7 @@ export function IntakeScheduleSection({ value, saved, hasFeeds, onChange }: { va
       </div>
       <p className="field-hint">Every run refreshes activity: commits, connected sources, session digests and, where turned on, the screenshots you sent. This step calls no agent.</p>
       <label className="check"><input type="checkbox" checked={schedule.propose} onChange={(e) => set({ propose: e.target.checked })} />Propose changes since last check</label>
-      <p className="field-hint">Calls the default agent when there is new work, and its provider bills the run.</p>
-      {hasFeeds ? (
-        <>
-          <label className="check"><input type="checkbox" checked={!!schedule.feeds} onChange={(e) => set({ feeds: e.target.checked })} />Propose from feeds</label>
-          <p className="field-hint">Calls the default agent once per new feed entry of the last seven days.</p>
-        </>
-      ) : null}
+      <p className="field-hint">Calls the default agent when there is new work{hasFeeds ? ", and once per feed entry of the last seven days that has no topics yet" : ""}. Its provider bills each run.</p>
       <label className="check"><input type="checkbox" checked={schedule.review} onChange={(e) => set({ review: e.target.checked })} />Review with sessions</label>
       <p className="field-hint">Reviews each complete week of the last four that isn't reviewed yet, with one agent call per week. A week is reviewed after it ends, on the Monday run.</p>
       <p className="muted small">

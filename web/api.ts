@@ -65,8 +65,10 @@ export function useJob(onDone?: (job: Job) => void) {
     }, 1000);
     return () => clearInterval(t);
   }, [job?.id, job?.status]);
-  const start = useCallback(async (url: string, body?: unknown) => {
-    const j = await api<Job>(url, "POST", body ?? {});
+  /** Starts a job. A route may start none and answer { skipped: true }, for example when the work was done a moment ago. */
+  const start = useCallback(async (url: string, body?: unknown): Promise<Job | null> => {
+    const answer = await api<Job | { skipped: true }>(url, "POST", body ?? {});
+    const j = "id" in answer ? answer : null;
     setJob(j);
     return j;
   }, []);

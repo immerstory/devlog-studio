@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowUp01Icon, Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { Spinner } from "@/components/ui/spinner";
 import { api, type Job } from "./api";
+import { loadDismissed, pruneDismissed, saveDismissed } from "./dismissed-jobs";
 
 /** Fired on window when a task the dock watched finishes; detail is the finished job. */
 export const JOB_FINISHED = "devlog:job-finished";
@@ -17,7 +18,6 @@ const KIND_LABEL: Record<string, string> = {
   sourceFilesAdd: "Adding files from sources",
   sourceMaterialsPreview: "Previewing material rules",
   intake: "Daily intake",
-  feeds: "Proposing from feeds",
   links: "Checking links",
   imagegen: "Generating images",
   social: "Writing a post",
@@ -90,7 +90,7 @@ function JobLog({ lines }: { lines: string[] }) {
  */
 export function JobDock({ titleFor }: { titleFor: (job: Job) => string | undefined }) {
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
   const [open, setOpen] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -123,6 +123,11 @@ export function JobDock({ titleFor }: { titleFor: (job: Job) => string | undefin
         }
         setJobs(all);
         saveRunning([...seenRunning.current.values()]);
+        setDismissed((d) => {
+          const kept = pruneDismissed(d, ids);
+          if (kept !== d) saveDismissed(kept);
+          return kept;
+        });
       }
       setNow(Date.now());
       // Poll quickly while something runs; otherwise just often enough to notice tasks started elsewhere.
@@ -141,7 +146,15 @@ export function JobDock({ titleFor }: { titleFor: (job: Job) => string | undefin
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   if (!visible.length) return null;
   const running = visible.filter((j) => j.status === "running").length;
-  const dismiss = (ids: string[]) => setDismissed((d) => new Set([...d, ...ids]));
+  const dismiss = (ids: string[]) => {
+    // A task lost in a restart exists only on this page, so hiding it removes it.
+    setLost((l) => l.filter((j) => !ids.includes(j.id)));
+    setDismissed((d) => {
+      const next = new Set([...d, ...ids]);
+      saveDismissed(next);
+      return next;
+    });
+  };
 
   return (
     <div className={`job-dock ${collapsed ? "collapsed" : ""}`} role="status" aria-live="polite">

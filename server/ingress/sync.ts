@@ -97,9 +97,34 @@ export interface SyncResult { records: number; links: number; unsupported: strin
 /** Raised when digests gain a field, so that logs are read again. */
 const CURSOR_VERSION = 6;
 
-/** Reads every enabled source. Cursors advance only after all of a connector's records are stored. */
-export async function syncActivity(range: DateRange, log: (l: string) => void = () => {}, only?: Record<string, IngressConnector>): Promise<SyncResult> {
+/** Syncs of one project, as the tail of a queue, so two syncs never read a source or advance a cursor at once. */
+const syncQueues = new Map<string, Promise<unknown>>();
+/** When the last full sync of each project finished, in milliseconds. */
+const lastFullSync = new Map<string, number>();
+/** An automatic refresh is skipped within this time after a full sync, because each one calls the connected APIs again. */
+export const RECENT_SYNC_MS = 5 * 60_000;
+
+/** True while a sync of the project runs or waits, or when its last full sync finished within RECENT_SYNC_MS. */
+export const activitySyncIsRecent = (pid: string, now = Date.now()) =>
+  syncQueues.has(pid) || now - (lastFullSync.get(pid) ?? 0) < RECENT_SYNC_MS;
+
+/** Reads every enabled source. A project's syncs run one at a time, in the order they start. */
+export function syncActivity(range: DateRange, log: (l: string) => void = () => {}, only?: Record<string, IngressConnector>): Promise<SyncResult> {
   const pid = projectId();
+  if (syncQueues.has(pid)) log("Waiting for another refresh of this project to finish…");
+  const next = (syncQueues.get(pid) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    const result = await syncActivityNow(pid, range, log, only);
+    if (!only) lastFullSync.set(pid, Date.now());
+    return result;
+  });
+  const tail = next.catch(() => {});
+  syncQueues.set(pid, tail);
+  void tail.then(() => { if (syncQueues.get(pid) === tail) syncQueues.delete(pid); });
+  return next;
+}
+
+/** Cursors advance only after all of a connector's records are stored. */
+async function syncActivityNow(pid: string, range: DateRange, log: (l: string) => void, only?: Record<string, IngressConnector>): Promise<SyncResult> {
   const project = getProject(pid).settings;
   const result: SyncResult = { records: 0, links: 0, unsupported: [], skippedLines: 0, errors: [] };
   const enabled: Array<{ connector: IngressConnector; source?: (typeof project.activitySources extends (infer S)[] | undefined ? S : never) }> = [
