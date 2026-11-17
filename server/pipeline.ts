@@ -321,7 +321,6 @@ function sessionFacts(r: ActivityRecord) {
   return { id: r.id, date: r.date, title: r.title, activeMinutes: d.activeMinutes.length, prompts: d.prompts, files: d.files.slice(0, SESSION_FILES), commits: d.commits, failedChecks: d.checks.filter((c) => !c.ok) };
 }
 
-/** One agent run per week with sessions. It adds topics and evidence, and it changes a suggestion's text only through a proposed edit. */
 /**
  * Proposes topics from the work since the last check, then from the feed entries that have no topics yet.
  * A failing step doesn't stop the other, and the error is raised at the end.
@@ -341,6 +340,7 @@ export async function runProposals(log: Log, agent?: AgentKind, write = runAgent
   if (failure) throw failure;
 }
 
+/** One agent run per week with sessions. It adds topics and evidence, and it changes a suggestion's text only through a proposed edit. */
 export async function runSessionReview(from: string, to: string, rerun: boolean, log: Log, agent?: AgentKind, write = runAgent) {
   const pid = projectId();
   const reviewed = new Set((await getValue<string[]>(pid, SESSION_REVIEWED)) ?? []);

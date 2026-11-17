@@ -452,13 +452,14 @@ function ProgressPanel({ state, reload, act }: { state: AppState; reload: () => 
     loadReview().catch(() => {});
     loadFeeds().catch(() => {});
   });
-  // Every visit starts by reading the sources, so the counts and proposals below work from current data.
+  // A visit reads the sources first, so the counts and proposals below work from current data. The server skips this
+  // refresh while another one runs or shortly after one.
   const refresh = useJob(() => {
     reload();
     loadFeeds().catch(() => {});
   });
   useEffect(() => {
-    refresh.start("/api/activity/sync").catch(() => {});
+    void act(() => refresh.start("/api/activity/sync", { auto: true }));
   }, []);
   // A refresh or intake that runs elsewhere can add feed entries too.
   useEffect(() => {
@@ -474,7 +475,7 @@ function ProgressPanel({ state, reload, act }: { state: AppState; reload: () => 
       <div className="row">
         <div className="grow">
           <strong>Refresh activity</strong>
-          <div className="muted small">Updates the app's record of the last 30 days from the sources: commits, connected activity, feed entries, materials from sources and screenshots. It calls no agent and proposes no topics. Runs each time this page opens.</div>
+          <div className="muted small">Updates the app's record of the last 30 days from the sources: commits, connected activity, feed entries, materials from sources and screenshots. It calls no agent and proposes no topics. Runs when this page opens, unless a refresh runs or ran in the last 5 minutes.</div>
         </div>
         <Button variant="outline" disabled={refresh.running} onClick={() => act(() => refresh.start("/api/activity/sync"))}>{refresh.running ? "Refreshing…" : "Refresh activity"}</Button>
       </div>

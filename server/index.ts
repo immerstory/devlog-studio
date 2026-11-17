@@ -72,7 +72,7 @@ import { postImageChoices } from "./egress/article.js";
 import { linkedinAuthUrl, linkedinExchange } from "./egress/linkedin.js";
 import type { ArticleDraft } from "../shared/outputs.js";
 import { addSessionImage, importingSources, importSessionImages, listSessionImages, setSessionImageStatus } from "./sessionImages.js";
-import { activityView, discoverSources, saveForgeToken, setManualLink, setVisibility, summarizeRecord, syncActivity } from "./ingress/sync.js";
+import { activitySyncIsRecent, activityView, discoverSources, saveForgeToken, setManualLink, setVisibility, summarizeRecord, syncActivity } from "./ingress/sync.js";
 import { captureOperation } from "./capture/provider.js";
 
 import { handleUpload, removeMaterial } from "./materials.js";
@@ -502,6 +502,8 @@ projectApi.post("/publications/:pubId/publish-late", h(async (req) => startPubli
 projectApi.get("/activity", h((req) => activityView({ from: isDate(req.query.from) ? req.query.from : undefined, to: isDate(req.query.to) ? req.query.to : undefined })));
 projectApi.get("/activity/sources", h(() => discoverSources()));
 projectApi.post("/activity/sync", h((req) => {
+  // An automatic refresh starts nothing while a sync runs or shortly after one.
+  if (req.body?.auto === true && activitySyncIsRecent(projectId())) return { skipped: true };
   const from = isDate(req.body?.from) ? req.body.from : new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
   return startJob("activity", "project", (log) => syncActivity({ from }, log));
 }));

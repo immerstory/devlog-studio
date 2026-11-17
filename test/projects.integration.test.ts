@@ -80,6 +80,12 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal((await syncFeeds({ from: day(30) })).records, 1, "an entry dated before the range stays out");
           assert.equal((await syncFeeds({ from: day(30) })).records, 0, "an unchanged file isn't read again");
           assert.deepEqual(await feedInfo(), { feeds: true, waiting: 1 });
+          const { syncActivity, activitySyncIsRecent, RECENT_SYNC_MS } = await import("../server/ingress/sync.js");
+          const second: string[] = [];
+          await Promise.all([syncActivity({ from: day(30) }), syncActivity({ from: day(30) }, (l) => second.push(l))]);
+          assert.equal(second[0], "Waiting for another refresh of this project to finish…", "a second sync waits for the first");
+          assert.ok(activitySyncIsRecent(news.id), "an automatic refresh skips a project that was just synced");
+          assert.ok(!activitySyncIsRecent(news.id, Date.now() + RECENT_SYNC_MS + 1));
           assert.match(feedPrompt("evidence.json", day(1), []), /You help an author turn their daily news brief/);
           let calls = 0;
           const lines: string[] = [];
