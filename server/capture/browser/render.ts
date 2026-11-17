@@ -8,7 +8,7 @@ import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { coveringDialog, coveringPaywall, hideNotices, inspectPage, refuseConsent } from "./verify.js";
 import { highlightScript } from "./highlight.js";
 import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
-import { retryReplacedPage } from "./replaced-page.js";
+import { retryReplacedPage, SCRIPT_FAILED } from "./replaced-page.js";
 
 /** The Chrome build this version of Puppeteer is made for. */
 const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
@@ -162,7 +162,7 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
       try {
         await page.evaluate(`(async () => {\n${opts.script}\n})()`);
       } catch (err) {
-        throw new Error(`The shot's script failed: ${(err as Error).message.split("\n")[0]}`);
+        throw new Error(`${SCRIPT_FAILED}${(err as Error).message.split("\n")[0]}`);
       }
     }
     await new Promise((r) => setTimeout(r, Math.max(0, opts.settleMs)));
