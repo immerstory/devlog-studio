@@ -93,6 +93,28 @@ test("a page with a scroll-driven animation can be filmed", async () => {
   }
 });
 
+test("ad rules hide ad slots inside the page but never the body that carries an ad attribute", async () => {
+  const { openPage } = await import("../server/capture/browser/render.js");
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(`<body data-ad-unit="article"><h1>Headline</h1><div id="slot" data-ad-unit="top">Ad</div></body>`);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    const session = await openPage({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, device: "desktop", output: { width: 640, height: 360 }, settleMs: 50, hide: [], log: () => {} });
+    try {
+      assert.deepEqual(
+        await session.run<string[]>(`[getComputedStyle(document.body).display, getComputedStyle(document.getElementById("slot")).display]`),
+        ["block", "none"],
+      );
+    } finally {
+      await session.close();
+    }
+  } finally {
+    server.close();
+  }
+});
+
 test("a highlighted sentence is found across elements and marked word by word on the page clock", async () => {
   const { openPage } = await import("../server/capture/browser/render.js");
   const fs = await import("node:fs");

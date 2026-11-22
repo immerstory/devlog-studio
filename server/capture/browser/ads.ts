@@ -8,12 +8,15 @@ export const AD_URLS = [
   "revcontent.com", "zergnet.com", "nativo.com", "adsrvr.org", "indexww.com", "bidswitch.net", "ad.plus", "adition.com", "stroeer", "uimserv.net",
 ].map((domain) => `*${domain}*`);
 
-/** Slots and widgets of ads that are left in the page after their requests are blocked. */
+/**
+ * Slots and widgets of ads that are left in the page after their requests are blocked. Each selector matches only
+ * inside the body, because some sites mark the body itself with ad attributes such as `data-ad-unit`.
+ */
 export const AD_CSS = [
   "ins.adsbygoogle", "[id^='div-gpt-ad']", "[id^='google_ads_iframe']", "[data-ad-slot]", "[data-ad-unit]", "[data-google-query-id]",
   "[aria-label='Advertisement' i]", "[aria-label='Anzeige' i]", "[class*='taboola' i]", "[id*='taboola' i]", "[class*='outbrain' i]", "[id*='outbrain' i]",
   ".ad-container", ".ad-slot", ".ad-wrapper", ".advert", ".advertisement", ".adsbox", "iframe[src*='ads']",
-].map((selector) => `${selector} { display: none !important; }`).join("\n");
+].map((selector) => `body ${selector} { display: none !important; }`).join("\n");
 
 /** Blocks ad networks for the page's requests. Call it before the page loads. */
 export async function blockAds(page: Page) {
