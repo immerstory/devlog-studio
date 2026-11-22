@@ -123,6 +123,62 @@ test("ad rules hide ad slots but not the body or page wrappers that carry ad mar
   }
 });
 
+test("a page that can't scroll is unlocked, however the lock is set, and a page with its own scroller keeps its layout", async () => {
+  const { openPage } = await import("../server/capture/browser/render.js");
+  const { HIDE_NOTICES } = await import("../server/capture/browser/verify.js");
+  const content = `<h1>Headline</h1><div style="height:4000px"></div>`;
+  const dialog = `<div role="dialog" aria-modal="true" style="position:fixed;inset:20% 10%;background:#fff">We use cookies</div>`;
+  const pages: Record<string, string> = {
+    // A fixed body that keeps the scroll position in its offset, set with !important as consent tools do.
+    "/fixed": `<html class="dialog-open"><style>.dialog-open body { overflow: hidden !important; position: fixed !important; top: -1200px; left: 0; right: 0; }</style><body>${content}${dialog}</body></html>`,
+    // The overflow shorthand and a full height on both the root and the body.
+    "/shorthand": `<html class="modal-open"><style>html.modal-open, html.modal-open body { overflow: hidden; height: 100%; }</style><body>${content}${dialog}</body></html>`,
+    // An overlay the notice detection doesn't find, which the shot hides with a selector.
+    "/selector": `<style>body { overflow: hidden; height: 100vh; }</style><body>${content}<div id="overlay">Subscribe to read on</div></body>`,
+    // A phone layout: a fixed body with its own scroller, and a small cookie banner.
+    "/app": `<style>body { margin: 0; position: fixed; inset: 0; overflow: hidden; }</style><body><div id="scroller" style="height:100%;overflow-y:auto">${content}</div>` +
+      `<div class="cookie-banner" style="position:fixed;bottom:0;left:0;right:0">This site uses cookies</div></body>`,
+  };
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(`<!doctype html>${pages[req.url ?? ""] ?? ""}`);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const open = (path: string, hide: string[] = []) => openPage({ url: base + path, device: "desktop", output: { width: 640, height: 360 }, settleMs: 50, hide, log: () => {} });
+  const scrollsTo = (y: number) => `(window.scrollTo(0, ${y}), window.scrollY)`;
+  try {
+    const fixed = await open("/fixed");
+    try {
+      assert.equal(await fixed.run<number>(scrollsTo(2000)), 2000);
+      // The site's script locks the page again at 1500, keeping that position in the body's offset.
+      await fixed.run(`(window.scrollTo(0, 0), Object.assign(document.body.style, { position: "fixed", overflow: "hidden", top: "-1500px" }), true)`);
+      assert.equal(await fixed.run<number>(scrollsTo(2000)), 0, "the page is locked again");
+      await fixed.run(HIDE_NOTICES);
+      assert.equal(await fixed.run<number>("window.scrollY"), 1500, "the next pass unlocks it and brings the kept position back");
+      assert.equal(await fixed.run<number>(scrollsTo(2000)), 2000);
+    } finally {
+      await fixed.close();
+    }
+    for (const [path, hide] of [["/shorthand", []], ["/selector", ["#overlay"]]] as const) {
+      const page = await open(path, [...hide]);
+      try {
+        assert.equal(await page.run<number>(scrollsTo(2000)), 2000, `${path} scrolls`);
+      } finally {
+        await page.close();
+      }
+    }
+    const app = await open("/app");
+    try {
+      assert.deepEqual(await app.run<string[]>(`[getComputedStyle(document.body).position, getComputedStyle(document.body).overflowY]`), ["fixed", "hidden"]);
+    } finally {
+      await app.close();
+    }
+  } finally {
+    server.close();
+  }
+});
+
 test("a highlighted sentence is found across elements and marked word by word on the page clock", async () => {
   const { openPage } = await import("../server/capture/browser/render.js");
   const fs = await import("node:fs");

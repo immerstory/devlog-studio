@@ -117,13 +117,50 @@ const BACKDROPS = `[...document.querySelectorAll("body *")].filter((el) => {
 })`;
 
 /**
- * Hides the notices still floating over the page after the choice, their backdrops, and closable notice bars. Hiding
- * agrees to nothing. The value is how many it hid. An expression, so it also runs while the page clock is paused.
+ * Unlocks a page that can't scroll to the end of its content, the way dialogs lock it: the root and the body get
+ * visible overflow, their natural height and their place in the flow, and the scroll position a fixed body kept in
+ * its offset comes back. A page that scrolls inside its own container is left as it is. Every pass checks again,
+ * because a dialog's script can lock the page anew. Inline `!important` declarations win over the site's
+ * `!important` rules. The scroll position is the same afterwards, unless the unlock brought a kept one back.
+ */
+const UNLOCK_SCROLL = `(() => {
+    const root = document.documentElement, body = document.body;
+    if (!body) return;
+    // The scroll position the end of the content needs; a small shortfall is margins and rounding, not a lock.
+    const needed = Math.max(body.scrollHeight, body.getBoundingClientRect().height) - innerHeight - 100;
+    if (needed <= 0) return;
+    const y = scrollY;
+    scrollTo(0, needed);
+    const scrolls = scrollY >= needed;
+    scrollTo(0, y);
+    if (scrolls) return;
+    const ownScroller = [...body.querySelectorAll("*")].some((el) => {
+      if (el.scrollHeight <= el.clientHeight + 1 || !/auto|scroll/.test(getComputedStyle(el).overflowY)) return false;
+      const b = el.getBoundingClientRect();
+      return b.width * b.height >= innerWidth * innerHeight * 0.5;
+    });
+    if (ownScroller) return;
+    const kept = getComputedStyle(body).position === "fixed" ? -parseFloat(getComputedStyle(body).top) || 0 : 0;
+    for (const el of [root, body]) {
+      const s = getComputedStyle(el);
+      if (/hidden|clip/.test(s.overflowX + s.overflowY)) el.style.setProperty("overflow", "visible", "important");
+      if (s.position === "fixed") el.style.setProperty("position", "static", "important");
+      el.style.setProperty("height", "auto", "important");
+      el.style.setProperty("max-height", "none", "important");
+    }
+    if (kept > 0) scrollTo(0, kept);
+  })()`;
+
+/**
+ * Hides the notices still floating over the page after the choice, their backdrops, and closable notice bars, and
+ * unlocks a page that can't scroll. Hiding agrees to nothing. The value is how many it hid. An expression, so it
+ * also runs while the page clock is paused.
  */
 export const HIDE_NOTICES = `(() => {
   const n = ${NOTICES};
   for (const x of n) x.el.style.setProperty("display", "none", "important");
   if (n.length) for (const el of ${BACKDROPS}) el.style.setProperty("display", "none", "important");
+  ${UNLOCK_SCROLL};
   const bars = ${NOTICE_BARS}.filter((el, i, all) => !all.some((other, j) => j !== i && el.contains(other)));
   for (const el of bars) el.style.setProperty("display", "none", "important");
   return n.length + bars.length;
