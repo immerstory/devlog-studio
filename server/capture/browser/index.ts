@@ -3,12 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { defaultPageDevice, FORMAT_SIZE, pageMoveProgress, pageShotMoves, type PageShot } from "../../../shared/types.js";
+import { defaultPageDevice, FORMAT_SIZE, pageMoveProgress, pageShotMoves, type Format, type PageShot } from "../../../shared/types.js";
 import { DEFAULT_PAGE_HEADERS, parseHeaders, type BrowserTargetConfig } from "../../../shared/projects.js";
 import type { CaptureProvider, CaptureOutput, CaptureResult, Log } from "../provider.js";
 import { encodeSequence } from "../encoding.js";
 import { CancelledError, throwIfCancelled } from "../../jobs.js";
-import { openPage } from "./render.js";
+import { openPage, type PageSession } from "./render.js";
+import type { PageTrace } from "./trace.js";
 import { savePageCheck } from "./checks.js";
 import { highlightScroll } from "./highlight.js";
 import { coveringPaywall, HIDE_NOTICES } from "./verify.js";
@@ -31,19 +32,28 @@ export function pageUrl(target: BrowserTargetConfig, url: string): string {
   return resolved.toString();
 }
 
+/** Opens a shot's page with the shot's settings, ready to film. */
+export function openShot(target: BrowserTargetConfig, shot: PageShot, format: Format, log: Log, trace?: PageTrace, onCheck = savePageCheck): Promise<PageSession> {
+  const url = pageUrl(target, shot.url);
+  if (trace) trace.url = url;
+  return openPage({ url, trace, device: shot.device ?? defaultPageDevice(format), output: FORMAT_SIZE[format], settleMs: shot.settleMs ?? 1000, hide: shot.hide ?? [], css: [target.css ?? "", shot.css ?? ""], script: shot.script, userAgent: target.userAgent, headers: parseHeaders(target.headers ?? DEFAULT_PAGE_HEADERS), source: shot, highlight: shot.highlight, realtime: shot.realtime, onCheck, log });
+}
+
+/** Where a shot's scroll starts and ends. A highlighted sentence holds the page still around it; the scroll fields don't apply. */
+export async function shotScroll(session: PageSession, shot: PageShot): Promise<{ still?: number; from: number; to: number }> {
+  const still = shot.highlight?.trim() ? await session.run<number>(highlightScroll) : undefined;
+  return { still, from: still ?? await session.scrollOf(shot.scrollFrom), to: still ?? await session.scrollOf(shot.scrollTo) };
+}
+
 async function render(target: BrowserTargetConfig, shot: PageShot, out: CaptureOutput, log: Log): Promise<CaptureResult> {
   const output = FORMAT_SIZE[out.format];
   const moving = pageShotMoves(shot);
   fs.mkdirSync(out.dir, { recursive: true });
   const frameDir = path.join(out.dir, "page-frames");
   fs.rmSync(frameDir, { recursive: true, force: true });
-  const url = pageUrl(target, shot.url);
-  const session = await openPage({ url, onLook: (look) => out.onLook?.(look, url), device: shot.device ?? defaultPageDevice(out.format), output, settleMs: shot.settleMs ?? 1000, hide: shot.hide ?? [], css: [target.css ?? "", shot.css ?? ""], script: shot.script, userAgent: target.userAgent, headers: parseHeaders(target.headers ?? DEFAULT_PAGE_HEADERS), source: shot, highlight: shot.highlight, realtime: shot.realtime, onCheck: savePageCheck, log });
+  const session = await openShot(target, shot, out.format, log, out.trace);
   try {
-    // A highlighted sentence holds the page still around it; the scroll fields don't apply.
-    const still = shot.highlight?.trim() ? await session.run<number>(highlightScroll) : undefined;
-    const from = still ?? await session.scrollOf(shot.scrollFrom);
-    const to = still ?? await session.scrollOf(shot.scrollTo);
+    const { still, from, to } = await shotScroll(session, shot);
     const frames = moving ? Math.max(2, out.frames) : 1;
     const shotSeconds = (frames - 1) / out.fps;
     const step = 1000 / out.fps;
@@ -96,7 +106,7 @@ async function render(target: BrowserTargetConfig, shot: PageShot, out: CaptureO
     if (session.releasedFrames) log(`  ${session.releasedFrames} frame(s) needed page time to run freely for a moment; script-driven effects may jump there.`);
     if (session.repeatedFrames) log(`  ${session.repeatedFrames} frame(s) repeat the previous picture: the page produced none in time.`);
   } catch (err) {
-    if (!(err instanceof CancelledError)) out.onLook?.(await session.look(), url);
+    if (!(err instanceof CancelledError)) await session.fail();
     throw err;
   } finally {
     await session.close();

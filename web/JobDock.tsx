@@ -19,6 +19,7 @@ const KIND_LABEL: Record<string, string> = {
   sourceMaterialsPreview: "Previewing material rules",
   intake: "Daily intake",
   links: "Checking links",
+  preview: "Previewing a page",
   imagegen: "Generating images",
   social: "Writing a post",
   article: "Writing an article",

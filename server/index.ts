@@ -49,6 +49,7 @@ import {
   runBackfill,
   runDiscovery,
   revertPost,
+  previewPage,
   previousTake,
   useSceneViewPose,
   writeScript,
@@ -81,6 +82,7 @@ import { listFolders } from "./folders.js";
 import { contentTypeOf, serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
 import { checkPostLinks, pageChecks } from "./capture/browser/checks.js";
+import { pageView } from "./capture/browser/views.js";
 import { generateSegmentImages } from "./imagegen.js";
 import { armIntake, DEFAULT_INTAKE, intakeInfo, isIntakeTime, scheduleIntake, startIntake } from "./intake.js";
 import { importBumperAudio, removeBumperAudio } from "./bumperAudio.js";
@@ -423,6 +425,9 @@ const epJob = (kind: string, work: (req: Request, log: (l: string) => void) => P
 });
 
 projectApi.get("/posts/:id/links/:format", h(async (req) => pageChecks(await loadPost(projectId(), param(req, "id")), fmt(req))));
+/** What the browser saw when a webpage shot last failed or was previewed, with the text of every step. */
+projectApi.get("/posts/:id/segments/:seg/page-view/:format", h(async (req) => (await pageView({ postId: (await loadPost(projectId(), param(req, "id"))).id, format: fmt(req), segmentId: param(req, "seg") })) ?? null));
+projectApi.post("/posts/:id/segments/:seg/page-preview/:format", epJob("preview", (req, log) => previewPage(param(req, "id"), fmt(req), param(req, "seg"), log)));
 projectApi.post("/posts/:id/links/:format", epJob("links", async (req, log) => checkPostLinks(await loadPost(projectId(), param(req, "id")), fmt(req), log)));
 projectApi.post("/posts/:id/images/:format", epJob("imagegen", (req, log) => generateSegmentImages(param(req, "id"), fmt(req), log, typeof req.body?.segmentId === "string" ? req.body.segmentId : undefined)));
 projectApi.post("/posts/:id/questions", epJob("questions", (req, log) => askQuestions(param(req, "id"), log, agentOf(req))));

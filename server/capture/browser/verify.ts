@@ -2,7 +2,9 @@ import puppeteer, { type HTTPResponse, type Page } from "puppeteer-core";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { blockedReason, chromePath, PHONE_AGENT } from "./render.js";
 import { blockAds } from "./ads.js";
-import { lookAt, type PageLook } from "./look.js";
+import { PAGE_TEXT } from "./look.js";
+import type { PageTrace } from "./trace.js";
+import { hiddenNotes, newlyHidden } from "./hidden.js";
 import { isReplacedPage, REPLACED_PAGE, ReplacedPageError, retryReplacedPage } from "./replaced-page.js";
 
 /** Text as a reader sees it: case, spacing, dashes and the kind of quote mark don't matter, since articles and their quotes often differ there. */
@@ -47,30 +49,30 @@ const REFUSE = /^(reject|decline|deny|refuse)( all| optional| non-essential| add
 /**
  * Refuses optional cookies the way a visitor would, by clicking the consent dialog's refuse button, also inside the
  * consent frames many sites use. Some sites reload after the choice, so the page settles before anything reads it.
- * Returns whether a button was clicked.
+ * Returns the label of the button it clicked.
  */
-export async function refuseConsent(page: Page): Promise<boolean> {
-  let clicked = false;
+export async function refuseConsent(page: Page): Promise<string | undefined> {
+  let clicked: string | undefined;
   const reload = page.waitForNavigation({ waitUntil: "load", timeout: 4000 }).catch(() => null);
   for (const frame of page.frames()) {
     if (clicked) break;
     const hit = await frame.evaluate((source: string) => {
       const pattern = new RegExp(source, "i");
       const candidates = [...document.querySelectorAll<HTMLElement>("button, [role=button], a[href='#'], input[type=button], input[type=submit]")];
-      const button = candidates.find((el) => {
-        const label = (el.innerText || (el as HTMLInputElement).value || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+      const labels = candidates.map((el) => (el.innerText || (el as HTMLInputElement).value || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim());
+      const i = candidates.findIndex((el, at) => {
         const box = el.getBoundingClientRect();
-        return box.width > 0 && box.height > 0 && pattern.test(label);
+        return box.width > 0 && box.height > 0 && pattern.test(labels[at]);
       });
-      button?.click();
-      return !!button;
-    }, REFUSE.source).catch(() => false);
-    clicked ||= hit;
+      candidates[i]?.click();
+      return labels[i];
+    }, REFUSE.source).catch(() => undefined);
+    clicked ??= hit;
   }
-  if (!clicked) return false;
+  if (clicked === undefined) return undefined;
   await reload;
   await page.waitForNetworkIdle({ idleTime: 500, timeout: 8000 }).catch(() => {});
-  return true;
+  return clicked;
 }
 
 /**
@@ -168,8 +170,7 @@ export const coveringDialog = (page: Page) =>
   })()`) as Promise<string | undefined>;
 
 interface PageText { title: string; text: string }
-const readPage = (page: Page) =>
-  page.evaluate(`({ title: document.title, text: document.body ? document.body.innerText : "" })`) as Promise<PageText>;
+const readPage = (page: Page) => page.evaluate(PAGE_TEXT) as Promise<PageText>;
 /** The expected text can be in the title too. A highlight marks words on the page, so the title doesn't count for it. */
 const showsExpected = (p: PageText, expect: string) => readable(`${p.title}\n${p.text}`).includes(readable(expect));
 const showsSentence = (p: PageText, sentence: string) => readable(p.text).includes(readable(sentence));
@@ -244,7 +245,12 @@ export async function inspectPage(page: Page, requested: string, response: HTTPR
   return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}), ...(problem && lost ? { lost: true } : {}) };
 }
 
-interface CheckPageOptions { userAgent?: string; headers?: Record<string, string>; device?: PageDevice; log?: (line: string) => void; /** Gets what the browser showed when the check failed. */ onLook?: (look: PageLook | undefined) => void }
+/** How a page answered, for the step in which it loaded. */
+export function loadNotes(requested: string, final: string, response: HTTPResponse | null): string[] {
+  return [...(response ? [`HTTP ${response.status()}`] : []), ...(movedTo(requested, final) ? [`Redirected to ${final}`] : [])];
+}
+
+interface CheckPageOptions { userAgent?: string; headers?: Record<string, string>; device?: PageDevice; log?: (line: string) => void; /** Records what the browser shows at each step. */ trace?: PageTrace }
 
 /**
  * Opens a page only to check it, without filming. A page that doesn't load is a failed check, not an error. A browser
@@ -264,6 +270,7 @@ const failedCheck = (url: string, shot: Pick<PageShot, "expect">, problem: strin
 
 /** One attempt at checkPage. A page that replaced itself throws, so it can be opened again. */
 async function checkPageOnce(url: string, shot: Pick<PageShot, "credit" | "expect" | "highlight">, opts: CheckPageOptions): Promise<PageCheck> {
+  opts.trace?.start();
   const browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio"] });
   try {
     const page = await browser.newPage();
@@ -277,13 +284,22 @@ async function checkPageOnce(url: string, shot: Pick<PageShot, "credit" | "expec
     const response = await page.goto(url, { waitUntil: "load", timeout: 60_000 });
     await page.waitForNetworkIdle({ idleTime: 500, timeout: 10_000 }).catch(() => {});
     const failed = async (check: PageCheck) => {
-      opts.onLook?.(await lookAt(page));
+      await opts.trace?.fail(page);
       return check;
     };
     const moments: PageMoment[] = [];
     await noteMoment(page, moments, "when the page loaded");
-    if (await refuseConsent(page)) await noteMoment(page, moments, "after the cookie choice");
-    if (await hideNotices(page).catch(() => 0)) await noteMoment(page, moments, "after notices were hidden");
+    await opts.trace?.step(page, "loaded", loadNotes(url, page.url(), response));
+    const refused = await refuseConsent(page);
+    if (refused !== undefined) {
+      await noteMoment(page, moments, "after the cookie choice");
+      await opts.trace?.step(page, "cookies", [`Clicked “${refused}”`]);
+    }
+    if (opts.trace) await newlyHidden(page);
+    if (await hideNotices(page).catch(() => 0)) {
+      await noteMoment(page, moments, "after notices were hidden");
+      await opts.trace?.step(page, "hidden", await hiddenNotes(page, []));
+    }
     const check = await inspectPage(page, url, response, shot, moments);
     if (!check.ok) return await failed(check);
     // Metered paywalls often open only after reading or scrolling for a moment.

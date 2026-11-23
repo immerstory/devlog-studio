@@ -4,7 +4,9 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { checkPage, littleText, lostAt, type PageMoment } from "../server/capture/browser/verify.js";
 import { openPage } from "../server/capture/browser/render.js";
-import type { PageLook } from "../server/capture/browser/look.js";
+import { PageTrace } from "../server/capture/browser/trace.js";
+import { previewShot } from "../server/capture/browser/preview.js";
+import { newPageShot } from "../shared/types.js";
 
 const SENTENCE = "Large screens take 47% of the weekend.";
 const article = `<title>Box office: Example Film opens</title><main id="article"><h1>Example Film opens</h1><p>${"Filler text. ".repeat(60)}</p><p>${SENTENCE}</p></main>`;
@@ -58,14 +60,15 @@ test("a sentence to highlight that an ad hides for a moment is waited for", asyn
   await serving(async (base) => {
     const check = await checkPage(`${base}/short-ad`, { expect: "Example Film", highlight: SENTENCE });
     assert.equal(check.ok, true, check.problem ?? "");
-    const looks: unknown[] = [];
-    const session = await openPage({ ...shot, url: `${base}/short-ad`, source: { expect: "Example Film", highlight: SENTENCE }, highlight: SENTENCE, onLook: (look) => looks.push(look) });
+    const trace = new PageTrace({ expect: "Example Film", highlight: SENTENCE });
+    const session = await openPage({ ...shot, url: `${base}/short-ad`, source: { expect: "Example Film", highlight: SENTENCE }, highlight: SENTENCE, trace });
     try {
       assert.ok(await session.run<number>(`document.querySelectorAll(".devlog-highlight").length`) > 0);
     } finally {
       await session.close();
     }
-    assert.deepEqual(looks, [], "a page that opens isn't looked at");
+    assert.equal(trace.failed, false);
+    assert.deepEqual(trace.steps.map((s) => [s.name, s.found, s.highlightFound]), [["loaded", true, true], ["cookies", true, false]], "each step tells whether the page shows the texts; the title counts for the expected text only");
   });
 });
 
@@ -82,16 +85,19 @@ test("a sentence that a shot's script reveals late is waited for", async () => {
 
 test("a failed page comes with what the browser showed and when the text was lost", async () => {
   await serving(async (base) => {
-    const looks: Array<PageLook | undefined> = [];
-    const onLook = (look: PageLook | undefined) => { looks.push(look); };
-    await assert.rejects(openPage({ ...shot, url: `${base}/long-ad`, source: { expect: "Example Film", highlight: SENTENCE }, highlight: SENTENCE, onLook }), (err: Error) => {
+    const traces = [new PageTrace({ highlight: SENTENCE }), new PageTrace({ highlight: SENTENCE })];
+    await assert.rejects(openPage({ ...shot, url: `${base}/long-ad`, source: { expect: "Example Film", highlight: SENTENCE }, highlight: SENTENCE, trace: traces[0] }), (err: Error) => {
       assert.equal(err.message, `The page doesn't show the sentence to highlight (“${SENTENCE}”). It was there when the page loaded, but not after the cookie choice. The page shows only: “Continue to Example in 5 seconds”.`);
       return true;
     });
-    const check = await checkPage(`${base}/long-ad`, { highlight: SENTENCE }, { onLook });
+    const check = await checkPage(`${base}/long-ad`, { highlight: SENTENCE }, { trace: traces[1] });
     assert.match(check.problem ?? "", /It was there when the page loaded, but not after the cookie choice\./);
-    assert.equal(looks.length, 2);
-    for (const look of looks) {
+    for (const trace of traces) {
+      assert.ok(trace.failed);
+      assert.deepEqual(trace.steps.map((s) => s.name), ["loaded", "cookies", "failed"]);
+      assert.deepEqual(trace.steps.map((s) => s.notes), [["HTTP 200"], ["Clicked “Reject all”"], []]);
+      assert.ok(trace.steps.every((s) => isJpeg(s.picture)));
+      const look = trace.steps.at(-1);
       assert.equal(look?.text, "Continue to Example in 5 seconds");
       assert.equal(look?.pageUrl, `${base}/long-ad`);
       assert.equal(look?.title, "Box office: Example Film opens");
@@ -102,7 +108,9 @@ test("a failed page comes with what the browser showed and when the text was los
 
 test("a sentence that only the title shows can't be highlighted, and a text that never appeared points at the link", async () => {
   await serving(async (base) => {
-    const titleOnly = await checkPage(`${base}/title-only`, { highlight: SENTENCE });
+    const trace = new PageTrace({ highlight: SENTENCE });
+    const titleOnly = await checkPage(`${base}/title-only`, { highlight: SENTENCE }, { trace });
+    assert.deepEqual(trace.steps.map((s) => s.highlightFound), [false, false]);
     assert.equal(titleOnly.problem, `The page doesn't show the sentence to highlight (“${SENTENCE}”).`);
     await assert.rejects(openPage({ ...shot, url: `${base}/empty`, source: { expect: "Example Film" } }), /doesn't show “Example Film”\. The page shows no text\. Check the link and the expected text of this shot\.$/);
   });
@@ -110,22 +118,91 @@ test("a sentence that only the title shows can't be highlighted, and a text that
 
 test("a page that fails while it is filmed can be looked at on its paused clock, and an address that doesn't load can't", async () => {
   await serving(async (base) => {
-    const session = await openPage({ ...shot, url: `${base}/plain` });
+    const trace = new PageTrace({});
+    const session = await openPage({ ...shot, url: `${base}/plain`, trace });
     try {
       await assert.rejects(session.scrollOf("#missing"), /Nothing on the page matches/);
-      const look = await session.look();
+      assert.match((await session.read()).text, /47% of the weekend/);
+      await session.fail();
+      const look = trace.steps.at(-1);
+      assert.equal(look?.name, "failed");
       assert.match(look?.text ?? "", /47% of the weekend/);
       assert.ok(isJpeg(look?.picture));
     } finally {
       await session.close();
     }
   });
-  const looks: unknown[] = [];
+  const trace = new PageTrace({});
   // Nothing listens on the port once its server is closed.
   const closed = http.createServer();
   await new Promise<void>((r) => closed.listen(0, "127.0.0.1", r));
   const { port } = closed.address() as AddressInfo;
   await new Promise((r) => closed.close(r));
-  await assert.rejects(openPage({ ...shot, url: `http://127.0.0.1:${port}/`, onLook: (look) => looks.push(look) }));
-  assert.deepEqual(looks, [undefined]);
+  await assert.rejects(openPage({ ...shot, url: `http://127.0.0.1:${port}/`, trace }));
+  assert.deepEqual(trace.steps, []);
+});
+
+test("a step names what was hidden, selectors that match nothing, and the CSS and script that ran", async () => {
+  pages["/busy"] = `<title>Busy</title><div style="display:none !important" id="own">Own</div><main><h1>Headline</h1><p>${"Filler text. ".repeat(60)}</p></main>
+    <div id="top" class="ad-slot"><script>var code;</script><div class="ad-slot">Buy now</div></div><div class="advert"></div><div class="advert"></div><script class="advert"></script><div class="promo">Promo</div><div class="promo">Promo</div>
+    <div id="cmp" class="cookie-banner" style="position:fixed;bottom:0;left:0;right:0">This site uses cookies</div>`;
+  await serving(async (base) => {
+    const trace = new PageTrace({});
+    const css = [".missing { color: red; } h1 { color: blue; } h1:hover { color: red; } p::before { content: ''; }", ""];
+    const session = await openPage({ ...shot, url: `${base}/busy`, hide: [".promo", ".gone", "p["], css, script: `document.title = "Scripted";`, trace });
+    await session.close();
+    assert.deepEqual(trace.steps.map((s) => [s.name, s.notes]), [
+      ["loaded", ["HTTP 200"]],
+      ["hidden", ["Hid notices and messages: div#cmp.cookie-banner “This site uses cookies”", "Hid ads: div#top.ad-slot “Buy now”, 2 × div.advert", "Hide “.promo” matches 2 elements", "Hide “.gone” matches nothing", "Hide “p[” isn't a valid CSS selector"]],
+      ["styled", ["Added CSS", "CSS “.missing” matches nothing", "Ran the script"]],
+    ]);
+    assert.equal(trace.steps.at(-1)!.title, "Scripted");
+  });
+});
+
+test("a page whose body is hidden shows no text", async () => {
+  pages["/hidden"] = `<title>Hidden</title><body style="display:none"><script>var code = "${SENTENCE}";</script><p>${SENTENCE}</p></body>`;
+  await serving(async (base) => {
+    const trace = new PageTrace({ highlight: SENTENCE });
+    const check = await checkPage(`${base}/hidden`, { highlight: SENTENCE }, { trace });
+    assert.match(check.problem ?? "", /The page shows no text\.$/);
+    assert.deepEqual(trace.steps.map((s) => [s.text, s.highlightFound]), [["", false], ["", false]]);
+  });
+});
+
+test("a page that is opened again starts its trace over", () => {
+  const trace = new PageTrace({});
+  trace.add("loaded", { pageUrl: "https://example.com/", title: "", text: "" });
+  trace.start();
+  assert.deepEqual(trace.steps, []);
+});
+
+test("a preview takes the first and the last frame, and names the problem that would fail the capture", async () => {
+  pages["/long"] = `<!doctype html><title>Long</title><style>body { margin: 0 }</style><div style="height:2000px;background:#00f"></div><div id="end" style="height:2000px;background:#f00">End</div>`;
+  await serving(async (base) => {
+    const { loadImage, createCanvas } = await import("@napi-rs/canvas");
+    const color = async (picture?: Buffer) => {
+      const image = await loadImage(picture!);
+      const ctx = createCanvas(image.width, image.height).getContext("2d");
+      ctx.drawImage(image, 0, 0);
+      return { size: [image.width, image.height], pixel: [...ctx.getImageData(image.width / 2, image.height / 2, 1, 1).data.slice(0, 3)].map((v) => (v > 127 ? 1 : 0)) };
+    };
+    const target = { baseUrl: base };
+    const noCheck = async () => {};
+    const ok = await previewShot(target, { ...newPageShot("/long"), scrollTo: 99_999, zoomTo: 1.5, settleMs: 0 }, "landscape", 4, () => {}, noCheck);
+    assert.equal(ok.problem, undefined);
+    assert.equal(ok.trace.url, `${base}/long`);
+    assert.deepEqual(ok.trace.steps.map((s) => s.name), ["loaded", "start", "end"]);
+    const [, start, end] = ok.trace.steps;
+    assert.deepEqual(start.notes, ["Scrolled to 0 px"]);
+    assert.match(end.notes[0], /^Scrolled to \d+ px; the page ends before 99999 px$/);
+    assert.equal(end.notes[1], "Zoom 1.5");
+    assert.deepEqual(await color(start.picture), { size: [1920, 1080], pixel: [0, 0, 1] });
+    assert.deepEqual(await color(end.picture), { size: [1920, 1080], pixel: [1, 0, 0] });
+    const still = await previewShot(target, { ...newPageShot("/long"), settleMs: 0 }, "landscape", 4, () => {}, noCheck);
+    assert.deepEqual(still.trace.steps.map((s) => s.name), ["loaded", "start"], "a still has one frame");
+    const missing = await previewShot(target, { ...newPageShot("/long"), scrollTo: "#missing", settleMs: 0 }, "landscape", 4, () => {}, noCheck);
+    assert.equal(missing.problem, "Nothing on the page matches “#missing”.");
+    assert.equal(missing.trace.steps.at(-1)?.name, "failed");
+  });
 });
