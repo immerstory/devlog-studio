@@ -98,8 +98,8 @@ test("ad rules hide ad slots but not the body or page wrappers that carry ad mar
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(
-      `<body data-ad-unit="article" class="has-taboola"><div id="app" data-ad-unit="page"><main class="outbrain-enabled"><h1>Headline</h1>` +
-        `<div id="slot" data-ad-unit="top">Ad</div><div id="widget" class="taboola-feed">Ad</div><div id="kept" class="advert">Content</div></main></div></body>`,
+      `<body data-ad-unit="article" class="has-taboola"><div id="app" data-ad-unit="page"><h1>Headline</h1><main id="main" class="outbrain-enabled">` +
+        `<div id="slot" data-ad-unit="top">Ad</div><div id="widget" class="taboola-feed"><article><h3>Ad</h3></article></div><div id="kept" class="advert">Content</div></main></div></body>`,
     );
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -108,12 +108,13 @@ test("ad rules hide ad slots but not the body or page wrappers that carry ad mar
     const session = await openPage({ url, device: "desktop", output: { width: 640, height: 360 }, settleMs: 50, hide: [], css: [".advert { display: block !important; }"], log: () => {} });
     try {
       const display = await session.run<Record<string, string>>(
-        `Object.fromEntries([["body", document.body], ...["app", "slot", "widget", "kept"].map((id) => [id, document.getElementById(id)])].map(([k, el]) => [k, getComputedStyle(el).display]))`,
+        `Object.fromEntries([["body", document.body], ...["app", "main", "slot", "widget", "kept"].map((id) => [id, document.getElementById(id)])].map(([k, el]) => [k, getComputedStyle(el).display]))`,
       );
       assert.equal(display.body, "block", "the body with ad markers stays visible");
       assert.equal(display.app, "block", "a wrapper around the page content stays visible");
+      assert.equal(display.main, "block", "a main region with an ad class stays visible");
       assert.equal(display.slot, "none", "an ad slot by attribute is hidden");
-      assert.equal(display.widget, "none", "an ad widget by class is hidden");
+      assert.equal(display.widget, "none", "an ad widget by class is hidden, also when its cards are articles");
       assert.equal(display.kept, "block", "custom CSS with the same selector overrides the ad rule");
     } finally {
       await session.close();
@@ -123,7 +124,7 @@ test("ad rules hide ad slots but not the body or page wrappers that carry ad mar
   }
 });
 
-test("a page that can't scroll is unlocked, however the lock is set, and a page with its own scroller keeps its layout", async () => {
+test("a page that can't scroll is unlocked, however the lock is set, and other pages keep their layout", async () => {
   const { openPage } = await import("../server/capture/browser/render.js");
   const { HIDE_NOTICES } = await import("../server/capture/browser/verify.js");
   const content = `<h1>Headline</h1><div style="height:4000px"></div>`;
@@ -139,6 +140,16 @@ test("a page that can't scroll is unlocked, however the lock is set, and a page 
     "/app": `<style>body { margin: 0; position: fixed; inset: 0; overflow: hidden; }</style><body><div id="scroller" style="height:100%;overflow-y:auto">${content}</div>` +
       `<div class="cookie-banner" style="position:fixed;bottom:0;left:0;right:0">This site uses cookies</div></body>`,
   };
+  // A lock on a page that keeps wide content out of view.
+  pages["/wide"] = `<style>html, body { overflow: hidden; height: 100%; }</style><body><div style="width:3000px;height:20px"></div>${content}${dialog}</body>`;
+  const unlocked: Record<string, string> = {
+    // Pages that scroll by script, although their styles look like a lock.
+    "/smooth": `<style>html { scroll-behavior: smooth; } body { overflow: hidden; }</style><body>${content}</body>`,
+    "/fraction": `<style>body { overflow: hidden; }</style><body><div style="height:4000.44px"></div></body>`,
+    // The body is the page's own scroller.
+    "/body": `<style>html { overflow: hidden; height: 100%; } body { margin: 0; height: 100%; overflow: auto; }</style><body>${content}</body>`,
+  };
+  Object.assign(pages, unlocked, { "/plain": `<style>body { overflow-x: hidden; }</style><body>${content}</body>` });
   const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(`<!doctype html>${pages[req.url ?? ""] ?? ""}`);
@@ -160,13 +171,30 @@ test("a page that can't scroll is unlocked, however the lock is set, and a page 
     } finally {
       await fixed.close();
     }
-    for (const [path, hide] of [["/shorthand", []], ["/selector", ["#overlay"]]] as const) {
+    for (const [path, hide] of [["/shorthand", []], ["/selector", ["#overlay"]], ["/wide", []]] as const) {
       const page = await open(path, [...hide]);
       try {
         assert.equal(await page.run<number>(scrollsTo(2000)), 2000, `${path} scrolls`);
+        assert.ok(await page.run<boolean>("document.documentElement.scrollWidth <= innerWidth"), `${path} gets no wider than the view`);
       } finally {
         await page.close();
       }
+    }
+    for (const path of Object.keys(unlocked)) {
+      const page = await open(path);
+      try {
+        assert.equal(await page.run<string | null>(`document.body.getAttribute("style")`), null, `${path} keeps its styles`);
+      } finally {
+        await page.close();
+      }
+    }
+    const plain = await open("/plain");
+    try {
+      await plain.run(`(window.__scrolls = 0, window.scrollTo = () => { window.__scrolls++; }, true)`);
+      await plain.run(HIDE_NOTICES);
+      assert.equal(await plain.run<number>("window.__scrolls"), 0, "a page whose styles hold no lock isn't scrolled");
+    } finally {
+      await plain.close();
     }
     const app = await open("/app");
     try {

@@ -118,23 +118,32 @@ const BACKDROPS = `[...document.querySelectorAll("body *")].filter((el) => {
 
 /**
  * Unlocks a page that can't scroll to the end of its content, the way dialogs lock it: the root and the body get
- * visible overflow, their natural height and their place in the flow, and the scroll position a fixed body kept in
- * its offset comes back. A page that scrolls inside its own container is left as it is. Every pass checks again,
- * because a dialog's script can lock the page anew. Inline `!important` declarations win over the site's
- * `!important` rules. The scroll position is the same afterwards, unless the unlock brought a kept one back.
+ * visible vertical overflow, their natural height and their place in the flow, and the scroll position a fixed body
+ * kept in its offset comes back. Horizontal overflow stays clipped, because it keeps off-canvas menus out of view. A
+ * page that scrolls inside its own container, which can be the body, is left as it is. Every pass checks again,
+ * because a dialog's script can lock the page anew, but only a page whose styles can hold a lock is scrolled to find
+ * out. The scrolling is instant, because a smooth scroll leaves the position unchanged while the check reads it.
+ * Inline `!important` declarations win over the site's `!important` rules. The scroll position is the same
+ * afterwards, unless the unlock brought a kept one back.
  */
 const UNLOCK_SCROLL = `(() => {
     const root = document.documentElement, body = document.body;
     if (!body) return;
-    // The scroll position the end of the content needs; a small shortfall is margins and rounding, not a lock.
+    const styles = [root, body].map((el) => getComputedStyle(el));
+    if (!styles.some((s) => s.position === "fixed" || /hidden|clip/.test(s.overflowY))) return;
+    const jump = (top) => scrollTo({ left: scrollX, top, behavior: "instant" });
+    // The scroll position the end of the content needs; a small shortfall is margins, not a lock.
     const needed = Math.max(body.scrollHeight, body.getBoundingClientRect().height) - innerHeight - 100;
     if (needed <= 0) return;
     const y = scrollY;
-    scrollTo(0, needed);
-    const scrolls = scrollY >= needed;
-    scrollTo(0, y);
+    jump(needed);
+    // Content heights can be fractions of a pixel, and the browser rounds the position it scrolls to.
+    const scrolls = scrollY >= needed - 1;
+    jump(y);
     if (scrolls) return;
-    const ownScroller = [...body.querySelectorAll("*")].some((el) => {
+    // The body scrolls by itself only when the root has its own overflow; otherwise the body's applies to the view.
+    const candidates = [...(styles[0].overflowY === "visible" ? [] : [body]), ...body.querySelectorAll("*")];
+    const ownScroller = candidates.some((el) => {
       if (el.scrollHeight <= el.clientHeight + 1 || !/auto|scroll/.test(getComputedStyle(el).overflowY)) return false;
       const b = el.getBoundingClientRect();
       return b.width * b.height >= innerWidth * innerHeight * 0.5;
@@ -143,12 +152,12 @@ const UNLOCK_SCROLL = `(() => {
     const kept = getComputedStyle(body).position === "fixed" ? -parseFloat(getComputedStyle(body).top) || 0 : 0;
     for (const el of [root, body]) {
       const s = getComputedStyle(el);
-      if (/hidden|clip/.test(s.overflowX + s.overflowY)) el.style.setProperty("overflow", "visible", "important");
+      if (/hidden|clip/.test(s.overflowY)) el.style.setProperty("overflow-y", "visible", "important");
       if (s.position === "fixed") el.style.setProperty("position", "static", "important");
       el.style.setProperty("height", "auto", "important");
       el.style.setProperty("max-height", "none", "important");
     }
-    if (kept > 0) scrollTo(0, kept);
+    if (kept > 0) jump(kept);
   })()`;
 
 /**
