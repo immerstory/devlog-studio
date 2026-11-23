@@ -22,7 +22,7 @@ import { ImageStrip, MediaPicker, type MediaItem } from "./MediaPicker";
 import { Spinner } from "@/components/ui/spinner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { DragDropVerticalIcon } from "@hugeicons/core-free-icons";
-import { autoFov, COMPARE_CAPTIONS, FOV_RANGE, STACK_MAX_IMAGES, ANGLE_FRAMING, DISTANCE_PADDING, MOTION_DEFAULTS, type PageCheck, type YouTubeUpload, type ShotAngle, type ShotDistance, type Post, type Format, type MotionType, type Script, type Segment, type TimelineProps, type Visual, type CaptureVisual, type SceneShot, type PageShot, type Material, type Suggestion, newPageShot } from "../shared/types";
+import { autoFov, COMPARE_CAPTIONS, FOV_RANGE, STACK_MAX_IMAGES, ANGLE_FRAMING, DISTANCE_PADDING, MOTION_DEFAULTS, type PageCheck, type PageView, type YouTubeUpload, type ShotAngle, type ShotDistance, type Post, type Format, type MotionType, type Script, type Segment, type TimelineProps, type Visual, type CaptureVisual, type SceneShot, type PageShot, type Material, type Suggestion, newPageShot } from "../shared/types";
 
 const FORMAT_LABEL: Record<Format, string> = { portrait: "Short 9:16", landscape: "Video 16:9" };
 const MOTION_UNIT: Record<MotionType, string> = { still: "", orbit: "°", push: "× distance", pan: "m", turn: "°", rise: "m" };
@@ -248,6 +248,9 @@ function PublishFields({ date, time, onSave }: { date?: string; time?: string; o
   );
 }
 
+interface PageChecks { checks: Record<string, PageCheck | null>; views: Record<string, PageView>; unlisted: string[] }
+const NO_PAGE_CHECKS: PageChecks = { checks: {}, views: {}, unlisted: [] };
+
 function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; allMaterials: Material[]; run: RunFn; busy: boolean; reload: () => Promise<Post> }) {
   const { targets } = useContext(CaptureTargetsContext);
   const { ep, format, epMaterials, allMaterials, run, busy, reload } = props;
@@ -262,9 +265,9 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
   useEffect(() => {
     if (!dirty) { setScript(ep.scripts[format]); setBaseTargets(scriptCaptureTargets(ep.scripts[format])); }
   }, [ep, format]);
-  const [pageChecks, setPageChecks] = useState<{ checks: Record<string, PageCheck | null>; unlisted: string[] }>({ checks: {}, unlisted: [] });
+  const [pageChecks, setPageChecks] = useState<PageChecks>(NO_PAGE_CHECKS);
   useEffect(() => {
-    api<{ checks: Record<string, PageCheck | null>; unlisted: string[] }>(`/api/posts/${ep.id}/links/${format}`).then(setPageChecks, () => setPageChecks({ checks: {}, unlisted: [] }));
+    api<PageChecks>(`/api/posts/${ep.id}/links/${format}`).then(setPageChecks, () => setPageChecks(NO_PAGE_CHECKS));
   }, [ep, format, busy]);
   const hasPages = !!script?.segments.some((s) => s.visual.type === "capture" && s.visual.shot.model === "page");
   const missingImages = script?.segments.filter((s) => s.visual.type === "material" && !s.visual.materialId && s.visual.description.trim()).length ?? 0;
@@ -389,6 +392,7 @@ function ScriptStep(props: { ep: Post; format: Format; epMaterials: Material[]; 
             >
             <SegmentEditor
               pageCheck={pageChecks.checks[seg.id]}
+              pageView={pageChecks.views[seg.id]}
               linkUnlisted={pageChecks.unlisted.includes(seg.id)}
               onHandle={(down) => setArmed(down ? i : null)}
               ep={ep}
@@ -447,10 +451,12 @@ function SegmentEditor(props: {
   onPreviousTake: () => Promise<void>;
   /** The latest check of a webpage shot's page. */
   pageCheck?: PageCheck | null;
+  /** What the browser saw when a webpage shot last failed. */
+  pageView?: PageView;
   /** The feed entries behind the post don't name this source shot's link. */
   linkUnlisted?: boolean;
 }) {
-  const { ep, seg, index, all, epMaterials, allMaterials, busy, pending, onStart, format, onChange, onMove, onHandle, onDelete, run, onPreviousTake, pageCheck, linkUnlisted } = props;
+  const { ep, seg, index, all, epMaterials, allMaterials, busy, pending, onStart, format, onChange, onMove, onHandle, onDelete, run, onPreviousTake, pageCheck, pageView, linkUnlisted } = props;
   const takes = seg.takes?.[format] ?? [];
   // Slides aren't captured, and a material segment's note to record its footage is stale once a material is chosen.
   const captureError = seg.visual.type === "slide" || (seg.visual.type === "material" && seg.visual.materialId) ? undefined : seg.captureError;
@@ -598,7 +604,7 @@ function SegmentEditor(props: {
           </>
         ) : null}
         {v.type === "capture" && v.model === "page" ? (
-          <PageShotFields shot={v} format={format} check={pageCheck} unlisted={linkUnlisted} onChange={(shot) => setVisual({ ...v, ...shot })}>
+          <PageShotFields shot={v} format={format} check={pageCheck} view={pageView} unlisted={linkUnlisted} onChange={(shot) => setVisual({ ...v, ...shot })}>
             <Button variant="outline" disabled={busy} onClick={() => { onStart("recapture"); run(`/api/posts/${ep.id}/capture/${format}`, { segmentId: seg.id }); }}>
               {pending === "recapture" ? <Spinner /> : null}
               {pending === "recapture" ? "Filming…" : media ? "Film again" : "Film page"}

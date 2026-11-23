@@ -1,27 +1,51 @@
 import React from "react";
 import { ListInput } from "@/components/list-input";
-import { defaultPageDevice, type Format, type PageCheck, type PageDevice, type PageShot } from "../shared/types";
+import { defaultPageDevice, type Format, type PageCheck, type PageDevice, type PageShot, type PageView } from "../shared/types";
+import { mediaUrl } from "./api";
 
 /** A scroll field: digits become pixels, anything else is a CSS selector. */
 const scrollValue = (raw: string): number | string => (/^\s*\d+(\.\d+)?\s*$/.test(raw) ? Number(raw) : raw.trim());
 const percent = (n: number) => Math.round(n * 100);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+const shortTime = (at: string) => new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
 /** What the latest check of the page found, in one line. */
 function CheckLine({ check }: { check?: PageCheck | null }) {
   if (check === undefined) return null;
   if (!check) return <p className="field-hint">Not checked yet. Check links, or film the page, to check it.</p>;
-  const when = new Date(check.checkedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const when = shortTime(check.checkedAt);
   return check.ok
     ? <p className="field-hint">Checked {when}: {check.title ? `“${check.title}”` : "the page loaded"}{check.expect ? ", with the expected text" : ""}.</p>
     : <p className="field-hint error">Checked {when}: {check.problem}</p>;
+}
+
+/** The picture and the text the browser had in front of it when the shot failed. */
+function FailureView({ view }: { view: PageView }) {
+  return (
+    <div className="page-view">
+      {view.picture ? (
+        <a href={mediaUrl(view.picture)} target="_blank" rel="noreferrer" title="Open the picture in full size">
+          <img src={mediaUrl(view.picture)} alt="The browser's view when the shot failed" loading="lazy" />
+        </a>
+      ) : null}
+      <div className="page-view-text">
+        <p className="field-hint"><b>What the browser saw</b> when {view.by === "check" ? "the link check" : "the capture"} failed, {shortTime(view.at)}{view.title ? `: “${view.title}”` : ""}</p>
+        {view.pageUrl !== view.url ? <p className="field-hint">The page was at {view.pageUrl}</p> : null}
+        <details>
+          <summary className="small">Text on the page</summary>
+          <pre>{view.text || "No text."}</pre>
+        </details>
+      </div>
+    </div>
+  );
 }
 
 /**
  * Fields of a webpage shot: page, device, where it scrolls from and to, how it zooms, and what to hide.
  * `children` holds the shot's action buttons.
  */
-export function PageShotFields({ shot, format, check, unlisted, onChange, children }: { shot: PageShot; format: Format; check?: PageCheck | null; unlisted?: boolean; onChange: (shot: PageShot) => void; children?: React.ReactNode }) {
+export function PageShotFields({ shot, format, check, view, unlisted, onChange, children }: { shot: PageShot; format: Format; check?: PageCheck | null; view?: PageView; unlisted?: boolean; onChange: (shot: PageShot) => void; children?: React.ReactNode }) {
   const set = (patch: Partial<PageShot>) => onChange({ ...shot, ...patch });
   const fallback = defaultPageDevice(format);
   return (
@@ -45,6 +69,7 @@ export function PageShotFields({ shot, format, check, unlisted, onChange, childr
       <label className="check" title="Films on the page's own clock instead of the exact frame clock, so streamed videos such as background videos play. Frames the browser can't deliver in time repeat the one before, so motion may stutter."><input type="checkbox" checked={!!shot.realtime} onChange={(e) => set({ realtime: e.target.checked || undefined })} />Real time</label>
       <label className="check"><input type="checkbox" checked={!shot.hideLink} onChange={(e) => set({ hideLink: e.target.checked ? undefined : true })} />Show the credit and link in the video</label>
       <CheckLine check={check} />
+      {view ? <FailureView view={view} /> : null}
       {unlisted ? <p className="field-hint error">The news entries behind this post don't name this link. Check that it is the article the segment cites.</p> : null}
       <div className="row">
         <label>

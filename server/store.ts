@@ -70,6 +70,12 @@ export const updateValue = <T>(pid: string, key: string, fn: (value: T | undefin
 export async function setValue(pid: string, key: string, value: unknown) {
   await projectWrite(pid, async (c) => { await c.query("INSERT INTO settings VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [`project:${pid}:${key}`, JSON.stringify(value)]); });
 }
+export async function deleteValue(pid: string, key: string) {
+  await projectWrite(pid, async (c) => { await c.query("DELETE FROM settings WHERE key = $1", [`project:${pid}:${key}`]); });
+}
+const pageViewPrefix = (postId: string) => `pageView:${postId}:`;
+/** Where the view of a webpage shot's latest failure is kept. */
+export const pageViewKey = (postId: string, format: Format, segmentId: string) => `${pageViewPrefix(postId)}${format}:${segmentId}`;
 export const getSnapshot = (pid: string) => getValue<Record<string, Snapshot>>(pid, "snapshot");
 export const setSnapshot = (pid: string, s: Record<string, Snapshot>) => setValue(pid, "snapshot", s);
 async function records<T>(pid: string, table: string, ids?: string[], lock?: pg.PoolClient): Promise<T[]> {
@@ -130,6 +136,7 @@ export async function deletePost(pid: string, id: string): Promise<string[]> {
       restored.push(s.data.id);
     }
     await c.query("DELETE FROM posts WHERE id = $1 AND project_id = $2", [id, pid]);
+    await c.query("DELETE FROM settings WHERE starts_with(key, $1)", [`project:${pid}:${pageViewPrefix(id)}`]);
     return restored;
   });
 }

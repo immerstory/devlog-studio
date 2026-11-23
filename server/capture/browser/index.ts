@@ -7,7 +7,7 @@ import { defaultPageDevice, FORMAT_SIZE, pageMoveProgress, pageShotMoves, type P
 import { DEFAULT_PAGE_HEADERS, parseHeaders, type BrowserTargetConfig } from "../../../shared/projects.js";
 import type { CaptureProvider, CaptureOutput, CaptureResult, Log } from "../provider.js";
 import { encodeSequence } from "../encoding.js";
-import { throwIfCancelled } from "../../jobs.js";
+import { CancelledError, throwIfCancelled } from "../../jobs.js";
 import { openPage } from "./render.js";
 import { savePageCheck } from "./checks.js";
 import { highlightScroll } from "./highlight.js";
@@ -37,7 +37,8 @@ async function render(target: BrowserTargetConfig, shot: PageShot, out: CaptureO
   fs.mkdirSync(out.dir, { recursive: true });
   const frameDir = path.join(out.dir, "page-frames");
   fs.rmSync(frameDir, { recursive: true, force: true });
-  const session = await openPage({ url: pageUrl(target, shot.url), device: shot.device ?? defaultPageDevice(out.format), output, settleMs: shot.settleMs ?? 1000, hide: shot.hide ?? [], css: [target.css ?? "", shot.css ?? ""], script: shot.script, userAgent: target.userAgent, headers: parseHeaders(target.headers ?? DEFAULT_PAGE_HEADERS), source: shot, highlight: shot.highlight, realtime: shot.realtime, onCheck: savePageCheck, log });
+  const url = pageUrl(target, shot.url);
+  const session = await openPage({ url, onLook: (look) => out.onLook?.(look, url), device: shot.device ?? defaultPageDevice(out.format), output, settleMs: shot.settleMs ?? 1000, hide: shot.hide ?? [], css: [target.css ?? "", shot.css ?? ""], script: shot.script, userAgent: target.userAgent, headers: parseHeaders(target.headers ?? DEFAULT_PAGE_HEADERS), source: shot, highlight: shot.highlight, realtime: shot.realtime, onCheck: savePageCheck, log });
   try {
     // A highlighted sentence holds the page still around it; the scroll fields don't apply.
     const still = shot.highlight?.trim() ? await session.run<number>(highlightScroll) : undefined;
@@ -94,6 +95,9 @@ async function render(target: BrowserTargetConfig, shot: PageShot, out: CaptureO
     if (paywall) throw new Error(`A paywall opened over the page while filming (“${paywall}…”). Show this source on a slide instead.`);
     if (session.releasedFrames) log(`  ${session.releasedFrames} frame(s) needed page time to run freely for a moment; script-driven effects may jump there.`);
     if (session.repeatedFrames) log(`  ${session.repeatedFrames} frame(s) repeat the previous picture: the page produced none in time.`);
+  } catch (err) {
+    if (!(err instanceof CancelledError)) out.onLook?.(await session.look(), url);
+    throw err;
   } finally {
     await session.close();
   }

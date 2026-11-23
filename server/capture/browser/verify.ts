@@ -2,6 +2,7 @@ import puppeteer, { type HTTPResponse, type Page } from "puppeteer-core";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
 import { blockedReason, chromePath, PHONE_AGENT } from "./render.js";
 import { blockAds } from "./ads.js";
+import { lookAt, type PageLook } from "./look.js";
 import { isReplacedPage, REPLACED_PAGE, ReplacedPageError, retryReplacedPage } from "./replaced-page.js";
 
 /** Text as a reader sees it: case, spacing, dashes and the kind of quote mark don't matter, since articles and their quotes often differ there. */
@@ -10,7 +11,7 @@ export const readable = (text: string) =>
 
 /** How long a check reads a page before it looks for a paywall that opens late. */
 const LATE_PAYWALL_MS = 3000;
-/** How long a check waits for the expected text to appear. */
+/** How long a check waits for the expected text and the sentence to highlight to appear. */
 const EXPECT_WAIT_MS = 8000;
 
 const pathOf = (url: URL) => url.pathname.replace(/\/+$/, "") || "/";
@@ -166,30 +167,68 @@ export const coveringDialog = (page: Page) =>
     return ${CONSENT_FRAMES}.length ? "a consent wall in a frame" : undefined;
   })()`) as Promise<string | undefined>;
 
+interface PageText { title: string; text: string }
+const readPage = (page: Page) =>
+  page.evaluate(`({ title: document.title, text: document.body ? document.body.innerText : "" })`) as Promise<PageText>;
+/** The expected text can be in the title too. A highlight marks words on the page, so the title doesn't count for it. */
+const showsExpected = (p: PageText, expect: string) => readable(`${p.title}\n${p.text}`).includes(readable(expect));
+const showsSentence = (p: PageText, sentence: string) => readable(p.text).includes(readable(sentence));
+
+/** What a page showed at an earlier moment of a run. `when` completes "It was there …". */
+export interface PageMoment extends PageText { when: string }
+/** Notes what the page shows now, so a message can name the moment a text was lost. */
+export async function noteMoment(page: Page, moments: PageMoment[], when: string) {
+  const now = await readPage(page).catch(() => undefined);
+  if (now) moments.push({ when, ...now });
+}
+
+/** When a text that is missing now was last on the page, as a sentence; empty when it never was. */
+export function lostAt(moments: PageMoment[], shown: (p: PageText) => boolean): string {
+  const last = moments.findLastIndex(shown);
+  if (last < 0) return "";
+  return ` It was there ${moments[last].when}, but not ${moments[last + 1]?.when ?? "a moment later"}.`;
+}
+
+/** A page that shows little text is often an ad, a wait or an error in the content's place, so a message quotes it. */
+export function littleText({ text }: PageText): string {
+  const plain = text.replace(/\s+/g, " ").trim();
+  if (!plain) return " The page shows no text.";
+  return plain.length > 400 ? "" : ` The page shows only: “${plain.length > 120 ? `${plain.slice(0, 120)}…` : plain}”.`;
+}
+
+/** Waits a few seconds for a sentence that the page shows late, for example after an ad in front of the content. */
+export async function waitForSentence(page: Page, sentence: string) {
+  for (let waited = 0; waited < EXPECT_WAIT_MS; waited += 500) {
+    const now = await readPage(page).catch(() => undefined);
+    if (now && showsSentence(now, sentence)) return;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
 /** A shot that shows a source: a redirect then means the article moved, and the shot fails. */
 export const isSourceShot = (shot: Pick<PageShot, "credit" | "expect">) => !!(shot.credit?.trim() || shot.expect?.trim());
 
 /**
  * What a loaded page shows compared with what the shot expects. An error status always fails. For a source shot,
- * a redirect to another page and a missing expected text fail too.
+ * a redirect to another page and a missing expected text fail too. `moments` are what the page showed earlier.
  */
-export async function inspectPage(page: Page, requested: string, response: HTTPResponse | null, shot: Pick<PageShot, "credit" | "expect" | "highlight">): Promise<PageCheck> {
+export async function inspectPage(page: Page, requested: string, response: HTTPResponse | null, shot: Pick<PageShot, "credit" | "expect" | "highlight">, moments: PageMoment[] = []): Promise<PageCheck> {
   const status = response?.status();
   const expect = shot.expect?.trim();
-  const read = () => page.evaluate(`({ title: document.title, text: document.body ? document.body.innerText : "" })`) as Promise<{ title: string; text: string }>;
-  const shows = (p: { title: string; text: string }) => readable(`${p.title}\n${p.text}`).includes(readable(expect ?? ""));
-  let shown = await read().catch(() => ({ title: "", text: "" }));
-  // A page that reloads after the consent choice, or renders late, gets a few seconds to show the text.
-  for (let waited = 0; expect && !shows(shown) && waited < EXPECT_WAIT_MS; waited += 500) {
-    await new Promise((r) => setTimeout(r, 500));
-    shown = await read().catch(() => shown);
-  }
-  const { title, text } = shown;
-  const finalUrl = page.url();
-  const found = expect ? shows(shown) : undefined;
   const highlight = shot.highlight?.trim();
-  const highlightFound = highlight ? readable(`${title}
-${text}`).includes(readable(highlight)) : undefined;
+  const hasExpected = (p: PageText) => !expect || showsExpected(p, expect);
+  const hasSentence = (p: PageText) => !highlight || showsSentence(p, highlight);
+  let shown = await readPage(page).catch(() => ({ title: "", text: "" }));
+  // A page that reloads after the consent choice, renders late or shows an ad first gets a few seconds to show the texts.
+  for (let waited = 0; !(hasExpected(shown) && hasSentence(shown)) && waited < EXPECT_WAIT_MS; waited += 500) {
+    await new Promise((r) => setTimeout(r, 500));
+    shown = await readPage(page).catch(() => shown);
+  }
+  const { title } = shown;
+  const finalUrl = page.url();
+  const found = expect ? hasExpected(shown) : undefined;
+  const highlightFound = highlight ? hasSentence(shown) : undefined;
+  const lost = found === false ? lostAt(moments, hasExpected) : highlightFound === false ? lostAt(moments, hasSentence) : "";
   const moved = lostPage(requested, finalUrl);
   const blocked = await blockedReason(page, status);
   const dialog = await coveringDialog(page).catch(() => undefined);
@@ -199,13 +238,13 @@ ${text}`).includes(readable(highlight)) : undefined;
     : paywall ? `A paywall covers the page (“${paywall}…”). Show this source on a slide instead.`
     : status && status >= 400 ? `The page answered HTTP ${status}.`
     : moved && isSourceShot(shot) ? `The link now leads to ${moved}.`
-    : found === false ? `The page doesn't show “${expect}”.`
-    : highlightFound === false ? `The page doesn't show the sentence to highlight (“${highlight}”).`
+    : found === false ? `The page doesn't show “${expect}”.${lost}${littleText(shown)}`
+    : highlightFound === false ? `The page doesn't show the sentence to highlight (“${highlight}”).${lost}${littleText(shown)}`
     : undefined;
-  return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}) };
+  return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}), ...(problem && lost ? { lost: true } : {}) };
 }
 
-interface CheckPageOptions { userAgent?: string; headers?: Record<string, string>; device?: PageDevice; log?: (line: string) => void }
+interface CheckPageOptions { userAgent?: string; headers?: Record<string, string>; device?: PageDevice; log?: (line: string) => void; /** Gets what the browser showed when the check failed. */ onLook?: (look: PageLook | undefined) => void }
 
 /**
  * Opens a page only to check it, without filming. A page that doesn't load is a failed check, not an error. A browser
@@ -237,15 +276,21 @@ async function checkPageOnce(url: string, shot: Pick<PageShot, "credit" | "expec
     await blockAds(page);
     const response = await page.goto(url, { waitUntil: "load", timeout: 60_000 });
     await page.waitForNetworkIdle({ idleTime: 500, timeout: 10_000 }).catch(() => {});
-    await refuseConsent(page);
-    await hideNotices(page).catch(() => 0);
-    const check = await inspectPage(page, url, response, shot);
-    if (!check.ok) return check;
+    const failed = async (check: PageCheck) => {
+      opts.onLook?.(await lookAt(page));
+      return check;
+    };
+    const moments: PageMoment[] = [];
+    await noteMoment(page, moments, "when the page loaded");
+    if (await refuseConsent(page)) await noteMoment(page, moments, "after the cookie choice");
+    if (await hideNotices(page).catch(() => 0)) await noteMoment(page, moments, "after notices were hidden");
+    const check = await inspectPage(page, url, response, shot, moments);
+    if (!check.ok) return await failed(check);
     // Metered paywalls often open only after reading or scrolling for a moment.
     await page.evaluate(`window.scrollTo(0, document.documentElement.scrollHeight / 3)`);
     await new Promise((r) => setTimeout(r, LATE_PAYWALL_MS));
     const paywall = await coveringPaywall(page).catch(() => undefined);
-    return paywall ? { ...check, ok: false, problem: `A paywall covers the page (“${paywall}…”). Show this source on a slide instead.` } : check;
+    return paywall ? await failed({ ...check, ok: false, problem: `A paywall covers the page (“${paywall}…”). Show this source on a slide instead.` }) : check;
   } catch (err) {
     if (isReplacedPage(err)) throw err;
     return failedCheck(url, shot, `The page didn't load: ${(err as Error).message}`);

@@ -405,6 +405,59 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
     assert.equal((await store.listNotes(one.id)).length, 1);
     const post = { id: "post-owned", outputDirs: [], title: "Weekly update", createdAt: note.createdAt, suggestionIds: [], materialIds: [], outputs: ["portrait" as const], outputStages: {}, brief: "", questions: [], scripts: {}, narration: {}, renders: {}, stage: "questions" as const };
     await store.savePost(one.id, post);
+    {
+      const http = await import("node:http");
+      const { capturePost, revertPost } = await import("../server/pipeline.js");
+      const { checkPostLinks, pageChecks } = await import("../server/capture/browser/checks.js");
+      const { pageView } = await import("../server/capture/browser/views.js");
+      let body = "<title>Ad</title><p>Continue to Example</p>";
+      const server = http.createServer((_req, res) => { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(body); });
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      const url = `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}/story`;
+      const pictures = new Map<string, Buffer>();
+      const views: import("../server/capture/browser/views.js").ViewIO = { putBuffer: async (key, picture) => { pictures.set(key, picture); }, deleteKey: async (key) => { pictures.delete(key); } };
+      const project = await createProject({ name: "Page views", sourcePath: process.cwd() });
+      try {
+        await saveProject(project.id, { ...getProject(project.id).settings, captureTargets: [{ id: "web", label: "Web", kind: "browser", config: { baseUrl: "" } }], defaultCaptureTargetId: "web" });
+        const shot = { model: "page" as const, url, scrollFrom: 0, scrollTo: 0, zoomFrom: 1, zoomTo: 1, focus: { x: 0.5, y: 0.5 }, settleMs: 0, expect: "Example Film" };
+        const script = { format: "portrait" as const, title: "T", metadata: { title: "T", description: "", tags: [] }, segments: [{ id: "seg-page", narration: "One.", visual: { type: "capture" as const, description: "Page", targetId: "web", shot } }] };
+        const paged = { ...post, id: "page-views", suggestionIds: [], materialIds: [], renders: {}, narration: {}, scripts: { portrait: script } };
+        await store.savePost(project.id, paged as import("../shared/types.js").Post);
+        await inContext({ projectId: project.id }, async () => {
+          const of = { postId: paged.id, format: "portrait" as const, segmentId: "seg-page" };
+          const loaded = () => store.loadPost(project.id, paged.id);
+          await capturePost(paged.id, "portrait", () => {}, undefined, views);
+          const filmed = (await pageChecks(await loaded(), "portrait")).views["seg-page"];
+          assert.equal(filmed.by, "capture");
+          assert.equal(filmed.text, "Continue to Example");
+          assert.equal(filmed.problem, (await loaded()).scripts.portrait!.segments[0].captureError, "the view and the shot name the same problem");
+          assert.deepEqual([...pictures.keys()], [filmed.picture]);
+          body = "<title>Example Film</title><p>Example Film</p>";
+          await checkPostLinks(await loaded(), "portrait", () => {}, views);
+          assert.deepEqual(await pageView(of), filmed, "a check that passes keeps the view of a failed capture");
+          body = "<title>Ad</title><p>Another ad</p>";
+          await checkPostLinks(await loaded(), "portrait", () => {}, views);
+          const checked = (await pageView(of))!;
+          assert.deepEqual([checked.by, checked.text], ["check", "Another ad"], "a failed check replaces the view");
+          assert.deepEqual([...pictures.keys()], [checked.picture], "and its picture replaces the one before");
+          const moved = structuredClone(await loaded());
+          (moved.scripts.portrait!.segments[0].visual as { shot: { url: string } }).shot.url = `${url}/2`;
+          assert.deepEqual((await pageChecks(moved, "portrait")).views, {}, "a view of another address isn't shown");
+          body = "<title>Example Film</title><p>Example Film</p>";
+          await checkPostLinks(await loaded(), "portrait", () => {}, views);
+          assert.equal(await pageView(of), undefined, "a check that passes clears the view of a failed check");
+          assert.equal(pictures.size, 0);
+          body = "<title>Ad</title><p>Third ad</p>";
+          await capturePost(paged.id, "portrait", () => {}, undefined, views);
+          assert.equal((await pageView(of))?.text, "Third ad");
+          await revertPost(paged.id, async () => {});
+          assert.equal(await pageView(of), undefined, "a reverted post keeps no views");
+        });
+      } finally {
+        server.close();
+        await deleteProject(project.id, false);
+      }
+    }
     await assert.rejects(store.loadPost(two.id, post.id), /not found/);
     await assert.rejects(store.updatePost(two.id, post.id, (p) => { p.title = "wrong"; }), /not found/);
     await assert.rejects(store.savePost(two.id, { ...post, title: "wrong" }), /not found/);
