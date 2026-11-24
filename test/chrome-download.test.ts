@@ -29,15 +29,16 @@ test("a finished build moves into place, keeps a complete one and replaces a par
     moveBuild(build("third"), place, executable);
     assert.equal(fs.readFileSync(executable, "utf8"), "third");
     assert.ok(!fs.existsSync(path.join(place, "bin", "other")));
+    assert.deepEqual(fs.readdirSync(path.dirname(place)), ["1.0"], "the replaced folder is removed");
   });
 });
 
-test("folders of stopped downloads go after some hours, other folders stay", () => {
+test("folders of stopped downloads go after a week, other folders stay", () => {
   inFolder((dir) => {
     for (const name of ["chrome-download-a", "chrome"]) write(path.join(dir, name, "file"), "");
-    removeStaleDownloads(dir, Date.now() + 3600_000);
-    assert.deepEqual(fs.readdirSync(dir).sort(), ["chrome", "chrome-download-a"], "a download can still run");
-    removeStaleDownloads(dir, Date.now() + 7 * 3600_000);
+    removeStaleDownloads(dir, Date.now() + 2 * 24 * 3600_000);
+    assert.deepEqual(fs.readdirSync(dir).sort(), ["chrome", "chrome-download-a"], "a download can still run after the computer slept");
+    removeStaleDownloads(dir, Date.now() + 8 * 24 * 3600_000);
     assert.deepEqual(fs.readdirSync(dir), ["chrome"]);
   });
 });
