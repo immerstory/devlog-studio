@@ -353,6 +353,25 @@ export interface PageCheck {
   /** The sentence the shot highlights, checked like the expected text. */
   highlight?: string;
   problem?: string;
+  /** The problem is a missing text that was on the page earlier in the same run. */
+  lost?: boolean;
+}
+
+/** What the browser saw when a webpage shot failed. Each shot keeps the one of its latest failure, for its editor. */
+export interface PageView {
+  /** The address the shot asks for, which tells a view of an earlier address apart. */
+  url: string;
+  at: string;
+  /** The run that failed: filming the shot, or a check of its link. */
+  by: "capture" | "check";
+  problem: string;
+  /** The address the browser was at. */
+  pageUrl: string;
+  title: string;
+  /** The text a reader of the page could see, shortened when very long. */
+  text: string;
+  /** Storage key of a picture of the browser's view. Absent when the page produced none. */
+  picture?: string;
 }
 
 /**

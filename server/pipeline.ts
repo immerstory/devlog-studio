@@ -43,12 +43,15 @@ import {
   updatePost,
   updateSuggestions,
 } from "./store.js";
-import { renderCapture, captureOperation, createCaptureSession } from "./capture/provider.js";
+import { renderCapture, captureOperation, createCaptureSession, type CaptureOutput } from "./capture/provider.js";
+import type { PageLook } from "./capture/browser/look.js";
+import { prunePageViews } from "./capture/browser/checks.js";
+import { clearPageView, isPageSegment, savePageView, type ViewIO } from "./capture/browser/views.js";
 
 import { narrate } from "./tts.js";
 import { buildTimeline, chapters, estimatedSpeechMs, toSrt } from "./timeline.js";
 import { renderVideo } from "./render.js";
-import { deleteKey, deletePrefix, putFile } from "./storage.js";
+import { deleteKey, deletePrefix, putBuffer, putFile } from "./storage.js";
 import { CancelledError, currentJobSignal, listJobs, throwIfCancelled } from "./jobs.js";
 import { uploadCaptions, uploadVideo } from "./youtube.js";
 import { limitImported, materialsForAgent, progressMaterials } from "./materials.js";
@@ -1014,17 +1017,21 @@ function segmentSeconds(seg: Segment) {
   return Math.min(12, Math.max(4, estimatedSpeechMs(seg) / 1000 + 1.5));
 }
 
+/** Where takes and the pictures of page views are kept. */
+export interface CaptureIO extends ViewIO { putFile(key: string, file: string): Promise<void> }
+const captureStorage: CaptureIO = { putBuffer, putFile, deleteKey };
+
 /** Deletes a take's media and its poster frame. */
-async function removeTakeFiles(media: string) {
-  await deleteKey(media).catch(() => {});
-  if (/\.mp4$/.test(media)) await deleteKey(media.replace(/\.mp4$/, ".jpg")).catch(() => {});
+async function removeTakeFiles(media: string, io: CaptureIO) {
+  await io.deleteKey(media).catch(() => {});
+  if (/\.mp4$/.test(media)) await io.deleteKey(media.replace(/\.mp4$/, ".jpg")).catch(() => {});
 }
 
 /**
  * Goes back to a segment's previous take for one format: its media and the visual settings that produced
- * it. The current take is deleted.
+ * it. The current take is deleted, and with it what the browser saw when a capture failed after it.
  */
-export async function previousTake(epId: string, segmentId: string, format: Format) {
+export async function previousTake(epId: string, segmentId: string, format: Format, io = captureStorage) {
   let discarded: string | undefined;
   const post = await updatePost(projectId(), epId, (ep) => {
     const seg = ep.scripts[format]?.segments.find((s) => s.id === segmentId);
@@ -1038,32 +1045,33 @@ export async function previousTake(epId: string, segmentId: string, format: Form
     seg.captureError = undefined;
     if (back.visual) seg.visual = back.visual;
   });
-  if (discarded) await removeTakeFiles(discarded);
+  if (discarded) await removeTakeFiles(discarded, io);
+  await clearPageView({ postId: epId, format, segmentId }, (view) => view.by === "capture", io).catch(() => {});
   return post;
 }
 
-async function captureSegment(ep: Post, seg: Segment, format: Format, log: Log, capture = renderCapture): Promise<string | undefined> {
+async function captureSegment(ep: Post, seg: Segment, format: Format, log: Log, capture = renderCapture, io = captureStorage, onLook?: CaptureOutput["onLook"]): Promise<string | undefined> {
   if (seg.visual.type !== "capture") return;
   const fps = config().render.fps;
-  const result = await capture(seg.visual, { dir: path.join(CACHE_DIR, "captures", ep.id, `${seg.id}-${format}`), format, frames: Math.round(segmentSeconds(seg) * fps), fps }, log);
+  const result = await capture(seg.visual, { dir: path.join(CACHE_DIR, "captures", ep.id, `${seg.id}-${format}`), format, frames: Math.round(segmentSeconds(seg) * fps), fps, onLook }, log);
   // Every capture gets its own key, so earlier takes stay available.
   const capturedAt = Date.now();
   const keyBase = `episodes/${ep.id}/captures/${seg.id}-${format}-${capturedAt.toString(36)}`;
   const key = keyBase + path.extname(result.file);
-  await putFile(key, result.file);
-  if (result.poster) { await putFile(`${keyBase}.jpg`, result.poster); fs.rmSync(result.poster, { force: true }); }
+  await io.putFile(key, result.file);
+  if (result.poster) { await io.putFile(`${keyBase}.jpg`, result.poster); fs.rmSync(result.poster, { force: true }); }
   fs.rmSync(result.file, { force: true });
   const current = seg.media?.[format];
   const takes = seg.takes?.[format] ?? (current ? [{ media: current, mediaSeconds: seg.mediaSeconds?.[format], capturedAt: seg.capturedAt ?? 0 }] : []);
   takes.push({ media: key, mediaSeconds: result.durationSeconds, capturedAt, visual: structuredClone(seg.visual) });
-  for (const dropped of takes.splice(0, Math.max(0, takes.length - MAX_TAKES))) await removeTakeFiles(dropped.media);
+  for (const dropped of takes.splice(0, Math.max(0, takes.length - MAX_TAKES))) await removeTakeFiles(dropped.media, io);
   seg.takes = { ...seg.takes, [format]: takes };
   seg.media = { ...seg.media, [format]: key };
   seg.mediaSeconds = { ...seg.mediaSeconds, [format]: result.durationSeconds };
   return result.warning;
 }
 
-export async function capturePost(epId: string, format: Format, log: Log, onlySegment?: string) {
+export async function capturePost(epId: string, format: Format, log: Log, onlySegment?: string, io = captureStorage) {
   const session = createCaptureSession();
   const ep = await loadPost(projectId(), epId);
   const script = ep.scripts[format];
@@ -1071,6 +1079,7 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
   let ok = 0;
   let failed = 0;
   let cancelled = false;
+  const unkept = (err: Error) => log(`  What the browser saw wasn't kept: ${err.message}`);
   for (const seg of script.segments) {
     if (onlySegment && seg.id !== onlySegment) continue;
     if (seg.visual.type === "material") {
@@ -1080,8 +1089,9 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
     if (seg.visual.type !== "capture") { seg.captureError = undefined; continue; }
     if (currentJobSignal()?.aborted) { cancelled = true; break; }
     log(`Capturing ${seg.visual.description.slice(0, 70)}…`);
+    const seen: { look?: PageLook; url?: string; problem?: string } = {};
     try {
-      seg.captureError = await captureSegment(ep, seg, format, log, session.render);
+      seg.captureError = await captureSegment(ep, seg, format, log, session.render, io, (look, url) => Object.assign(seen, { look, url }));
       if (seg.captureError) log(`  warning: ${seg.captureError}`);
       seg.capturedAt = Date.now();
       ok++;
@@ -1090,8 +1100,14 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
       if (err instanceof CancelledError) { cancelled = true; break; }
       seg.captureError = (err as Error).message;
       failed++;
+      seen.problem = seg.captureError;
       log(`  failed: ${seg.captureError}`);
     }
+    // A shot that fails because the task is cancelled keeps its view.
+    if (!isPageSegment(seg) || (seen.problem && currentJobSignal()?.aborted)) continue;
+    // The view only explains the result, so a problem with it never changes whether the shot counts as captured.
+    const of = { postId: epId, format, segmentId: seg.id };
+    await (seen.problem && seen.look && seen.url ? savePageView(of, { url: seen.url, by: "capture", problem: seen.problem }, seen.look, io) : clearPageView(of, undefined, io)).catch(unkept);
   }
   // Merge capture results into the latest saved episode so concurrent edits survive.
   await updatePost(projectId(), epId, (fresh) => {
@@ -1106,6 +1122,7 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
     }
     if (outputStage(fresh, format) === "script") setOutputStage(fresh, format, "capture");
   });
+  await prunePageViews(epId, format, io).catch(unkept);
   log(`Captured ${ok}, failed ${failed}.`);
   // Shots captured before the cancel are saved above; the job still ends as cancelled.
   if (cancelled) throw new CancelledError();

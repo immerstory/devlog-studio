@@ -6,9 +6,11 @@ import { unityProvider } from "./unity/index.js";
 import { browserProvider } from "./browser/index.js";
 import { blenderProvider } from "./blender/index.js";
 import type { SceneObject } from "./unity/client.js";
+import type { PageLook } from "./browser/look.js";
 
 export type Log = (line: string) => void;
-export interface CaptureOutput { dir: string; format: Format; frames: number; fps: number }
+/** `onLook` gets what the browser showed at each failed try of a webpage shot, and the address the shot asks for. */
+export interface CaptureOutput { dir: string; format: Format; frames: number; fps: number; onLook?: (look: PageLook | undefined, url: string) => void }
 export interface CaptureResult { file: string; poster?: string; durationSeconds?: number; warning?: string }
 export interface CaptureProvider<TConfig, TShot> {
   kind: "unity-mcp" | "blender-mcp" | "unreal" | "browser";

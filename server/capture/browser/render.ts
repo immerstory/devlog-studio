@@ -2,23 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import puppeteer, { type Browser, type CDPSession, type Page } from "puppeteer-core";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { Browser as BrowserKind, computeExecutablePath, install } from "@puppeteer/browsers";
-import { CACHE_DIR } from "../../config.js";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
-import { coveringDialog, coveringPaywall, hideNotices, inspectPage, refuseConsent } from "./verify.js";
+import { currentJobSignal } from "../../jobs.js";
+import { chromePath } from "./chrome.js";
+import { coveringDialog, coveringPaywall, hideNotices, inspectPage, noteMoment, refuseConsent, waitForSentence, type PageMoment } from "./verify.js";
+import { lookAt, type PageLook } from "./look.js";
 import { highlightScript } from "./highlight.js";
 import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
 import { isReplacedPage, retryReplacedPage, SCRIPT_LEFT_PAGE, ScriptError } from "./replaced-page.js";
-
-/** The Chrome build this version of Puppeteer is made for. */
-const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
-
-/** Path of the Chrome headless shell, downloaded on first use. */
-export async function chromePath(): Promise<string> {
-  const executable = computeExecutablePath(CHROME);
-  if (!fs.existsSync(executable)) await install(CHROME);
-  return executable;
-}
 
 /** CSS viewport width per device and orientation; the height follows the video's aspect ratio. */
 const VIEWPORT_WIDTH: Record<PageDevice, { portrait: number; landscape: number }> = {
@@ -86,6 +77,8 @@ export interface PageSession {
   run<T>(expression: string): Promise<T>;
   /** Advances page time by `ms` and saves a screenshot of the frame at the video's resolution. */
   frame(f: PageFrame, ms: number, file: string): Promise<void>;
+  /** What the browser shows now. The page's clock runs on from here, so nothing is filmed afterwards. */
+  look(): Promise<PageLook | undefined>;
   close(): Promise<void>;
 }
 
@@ -99,7 +92,7 @@ export function openPage(opts: OpenPageOptions): Promise<PageSession> {
   return retryReplacedPage(() => openPageOnce(opts), opts.log);
 }
 
-type OpenPageOptions = { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; log: (l: string) => void };
+type OpenPageOptions = { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; /** Gets what the browser showed each time the page couldn't be opened for filming. */ onLook?: (look: PageLook | undefined) => void; log: (l: string) => void };
 
 async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
   const orientation = opts.output.height > opts.output.width ? "portrait" : "landscape";
@@ -108,10 +101,13 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
   const height = Math.ceil((width * opts.output.height) / opts.output.width);
   const scale = opts.output.width / width;
   let browser: Browser | undefined;
+  let opened: Page | undefined;
+  let pausedClock: CDPSession | undefined;
   let scriptRan = false;
   try {
     browser = await puppeteer.launch({ executablePath: await chromePath(), headless: true, protocolTimeout: 30_000, args: ["--lang=en-US", "--hide-scrollbars", "--mute-audio", "--autoplay-policy=no-user-gesture-required"] });
     const page = await browser.newPage();
+    opened = page;
     const agent = opts.userAgent?.trim() || (opts.device === "phone" ? PHONE_AGENT : "");
     if (agent) await page.setUserAgent(agent);
     const headers = opts.headers ?? {};
@@ -133,7 +129,12 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     const response = await page.goto(opts.url, { waitUntil: "load", timeout: 60_000 });
     // Busy pages (endless image loading, chat widgets, analytics) never go quiet, so quiet is waited for briefly only.
     await page.waitForNetworkIdle({ idleTime: 500, timeout: 10_000 }).catch(() => {});
-    if (await refuseConsent(page)) opts.log("Refused optional cookies in the consent dialog.");
+    const moments: PageMoment[] = [];
+    await noteMoment(page, moments, "when the page loaded");
+    if (await refuseConsent(page)) {
+      opts.log("Refused optional cookies in the consent dialog.");
+      await noteMoment(page, moments, "after the cookie choice");
+    }
     const notices = await hideNotices(page).catch(() => 0);
     const pleas = await hideAdPleas(page).catch(() => 0);
     if (pleas) opts.log(`Hid ${pleas} message(s) in empty ad slots.`);
@@ -145,16 +146,18 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
       ...opts.hide.filter((s) => s.trim()).map((s) => `${s} { display: none !important; }`),
     ].join("\n");
     await page.addStyleTag({ content: css });
+    await noteMoment(page, moments, "after notices, ads and the elements under Hide were hidden");
     // A shot's script can reveal the sentence to highlight, for example by opening a tab, so with a script the
     // sentence is looked for once the script has run (below), not in the page as it loads.
     const deferHighlight = !!opts.script?.trim() && !!opts.source?.highlight?.trim();
-    const check = await inspectPage(page, opts.url, response, deferHighlight ? { ...opts.source, highlight: undefined } : opts.source ?? {});
+    const check = await inspectPage(page, opts.url, response, deferHighlight ? { ...opts.source, highlight: undefined } : opts.source ?? {}, moments);
     if (deferHighlight) check.highlight = opts.source!.highlight!.trim();
     await opts.onCheck?.(check);
     if (check.finalUrl) opts.log(`The page is now at ${check.finalUrl}.`);
     if (!check.ok) {
       if (check.problem?.startsWith("The site blocked")) throw new Error(`${check.problem} Record the page yourself and upload it as a material, or film a page that allows automated browsers.`);
-      throw new Error(`${check.problem} Check the link${check.expect ? " and the expected text" : ""} of this shot.`);
+      // A text the page showed earlier in the run says the link and the text are right.
+      throw new Error(check.lost ? check.problem : `${check.problem} Check the link${check.expect ? " and the expected text" : ""} of this shot.`);
     }
     // Custom CSS goes in separate style elements, so a mistake in it cannot disable the rules above.
     for (const custom of opts.css ?? []) if (custom.trim()) await page.addStyleTag({ content: custom });
@@ -170,6 +173,8 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     await new Promise((r) => setTimeout(r, Math.max(0, opts.settleMs)));
     // Some consent dialogs return after a reload or open late, so the last look before filming refuses and hides again.
     if (await refuseConsent(page)) opts.log("Refused optional cookies in a consent dialog that opened late.");
+    // Once the clock is paused, a sentence the page shows late can't appear.
+    if (opts.highlight?.trim()) await waitForSentence(page, opts.highlight);
     await hideNotices(page).catch(() => 0);
     const late = await coveringDialog(page).catch(() => undefined);
     if (late) throw new Error(`A cookie dialog covers the page (“${late}…”). Hide it with a CSS selector under Hide.`);
@@ -184,7 +189,10 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     cdp.on("Network.loadingFailed", (e) => inFlight.delete(e.requestId));
     const freshRequests = () => [...inFlight.values()].some((started) => Date.now() - started < 2000);
     // A real-time session leaves the page on its own clock, so its streamed videos load and play.
-    if (!opts.realtime) await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
+    if (!opts.realtime) {
+      await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
+      pausedClock = cdp;
+    }
 
     // While page time is paused, promises never settle, so expressions run synchronously through the protocol.
     const run = async <T>(expression: string): Promise<T> => {
@@ -308,11 +316,14 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, image);
       },
+      look: () => lookAt(page, pausedClock),
       async close() {
         await browser?.close();
       },
     };
   } catch (err) {
+    // A cancelled run shows nothing, so it ends without a look.
+    if (!currentJobSignal()?.aborted) opts.onLook?.(opened && (await lookAt(opened, pausedClock)));
     await browser?.close().catch(() => {});
     // After a shot's script ran, a page that is gone counts as the script leaving it, so it isn't opened again.
     throw scriptRan && isReplacedPage(err) ? new ScriptError(SCRIPT_LEFT_PAGE) : err;
