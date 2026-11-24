@@ -83,6 +83,7 @@ import { contentTypeOf, serveObject } from "./storage.js";
 import { startStatsRefresh, scheduleStats, statsReport } from "./stats.js";
 import { checkPostLinks, pageChecks } from "./capture/browser/checks.js";
 import { pageView } from "./capture/browser/views.js";
+import { badRequest, checkFormat, formatParam } from "./params.js";
 import { generateSegmentImages } from "./imagegen.js";
 import { armIntake, DEFAULT_INTAKE, intakeInfo, isIntakeTime, scheduleIntake, startIntake } from "./intake.js";
 import { importBumperAudio, removeBumperAudio } from "./bumperAudio.js";
@@ -127,12 +128,8 @@ const h = (fn: Handler) => async (req: Request, res: Response, next: NextFunctio
     next(err);
   }
 };
-const bad = (msg: string) => Object.assign(new Error(msg), { status: 400 });
-const fmt = (req: Request): Format => {
-  const f = req.params.format as Format;
-  if (!FORMATS.includes(f)) throw bad(`Unknown format ${f}`);
-  return f;
-};
+const bad = badRequest;
+const fmt = (req: Request): Format => formatParam(req.params.format);
 const agentOf = (req: Request): AgentKind | undefined => (req.body?.agent === "codex" || req.body?.agent === "claude" ? req.body.agent : undefined);
 const param = (req: Request, name: string) => String(req.params[name]);
 const MAX_STORY_PERIOD_DAYS = 184;
@@ -419,11 +416,11 @@ projectApi.put(
   }),
 );
 
-/** A task of a post, or of one of its segments with `perSegment`. */
+/** A task of a post, or with `perSegment` of one of its segments in one format. */
 const epJob = (kind: string, work: (req: Request, log: (l: string) => void) => Promise<unknown>, perSegment = false) => h(async (req) => {
-  if ("format" in req.params) fmt(req);
+  checkFormat(req.params);
   await loadPost(projectId(), param(req, "id"));
-  return startJob(kind, perSegment ? `${param(req, "id")}:${param(req, "seg")}` : param(req, "id"), (log) => work(req, log));
+  return startJob(kind, perSegment ? `${param(req, "id")}:${param(req, "seg")}:${param(req, "format")}` : param(req, "id"), (log) => work(req, log));
 });
 
 projectApi.get("/posts/:id/links/:format", h(async (req) => pageChecks(await loadPost(projectId(), param(req, "id")), fmt(req))));

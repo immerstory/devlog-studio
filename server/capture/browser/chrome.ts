@@ -7,8 +7,8 @@ import { CACHE_DIR } from "../../config.js";
 const CHROME = { browser: Browser.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
 
 const DOWNLOAD_PREFIX = "chrome-download-";
-/** No download takes this long, so an older folder belongs to one that was stopped. */
-const STALE_MS = 6 * 3600_000;
+/** Old enough that the computer didn't just sleep during the download, so the folder belongs to one that was stopped. */
+const STALE_MS = 7 * 24 * 3600_000;
 
 /** The download in progress, which captures that start meanwhile share. */
 let installing: Promise<void> | undefined;
@@ -48,12 +48,20 @@ export function moveBuild(from: string, place: string, executable: string) {
     fs.renameSync(from, place);
   } catch {
     if (fs.existsSync(executable)) return;
-    fs.rmSync(place, { recursive: true, force: true });
+    // Moved away before it is removed, so a build that another process puts there at this moment isn't lost.
+    const aside = `${place}.${process.pid}-${Date.now()}`;
     try {
-      fs.renameSync(from, place);
+      fs.renameSync(place, aside);
+    } catch {
+      // Another process moved it away first.
+    }
+    const moved = path.join(aside, path.relative(place, executable));
+    try {
+      fs.renameSync(fs.existsSync(moved) ? aside : from, place);
     } catch (err) {
       if (!fs.existsSync(executable)) throw err;
     }
+    fs.rmSync(aside, { recursive: true, force: true, maxRetries: 3 });
   }
 }
 
@@ -65,7 +73,7 @@ export function removeStaleDownloads(dir: string, now = Date.now()) {
     try {
       if (now - fs.statSync(folder).mtimeMs > STALE_MS) fs.rmSync(folder, { recursive: true, force: true });
     } catch {
-      // Another process removed it, or still holds it open.
+      // Another process removed it, or on Windows still has a file in it open.
     }
   }
 }

@@ -411,7 +411,14 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
       const { checkPostLinks, pageChecks } = await import("../server/capture/browser/checks.js");
       const { clearPageView, pageView, savePageView } = await import("../server/capture/browser/views.js");
       let body = "<title>Ad</title><p>Continue to Example</p>";
-      const server = http.createServer((_req, res) => { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(body); });
+      let opened = () => {};
+      // Without a body, the page doesn't load.
+      const server = http.createServer((req, res) => {
+        opened();
+        if (!body) { req.socket.destroy(); return; }
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(body);
+      });
       await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
       const url = `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}/story`;
       const pictures = new Map<string, Buffer>();
@@ -477,13 +484,27 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal((await loaded()).scripts.portrait!.segments[0].captureError, "storage is down");
           assert.deepEqual(await pageView(of), passed, "a capture that fails after the page was filmed keeps a preview");
           assert.equal(listed.text, undefined);
-          const { startJob, getJob } = await import("../server/jobs.js");
+          const { cancelJob, startJob, getJob } = await import("../server/jobs.js");
+          const finished = async (id: string) => { while (getJob(id)!.status === "running") await new Promise((r) => setTimeout(r, 20)); return getJob(id)!.status; };
+          const kept = (await loaded()).scripts.portrait!.segments[0];
+          body = "<title>Ad</title><p>Ad</p>";
+          const cancelled = await startJob("capture", paged.id, () => capturePost(paged.id, "portrait", () => {}, undefined, views));
+          opened = () => { cancelJob(cancelled.id); };
+          assert.equal(await finished(cancelled.id), "cancelled");
+          opened = () => {};
+          assert.deepEqual((await loaded()).scripts.portrait!.segments[0], kept, "a shot that fails while the task is cancelled keeps its error and takes");
+          assert.deepEqual(await pageView(of), passed, "and its view");
+          body = "";
+          await capturePost(paged.id, "portrait", () => {}, undefined, views);
+          assert.match((await loaded()).scripts.portrait!.segments[0].captureError ?? "", /ERR_EMPTY_RESPONSE/);
+          assert.deepEqual([await pageView(of), pictures.size], [undefined, 0], "a capture whose page doesn't load removes a preview, which shows a page that is gone");
+          body = "<title>Example Film</title><p>Example Film</p>";
           let finish!: () => void;
           const job = await startJob("preview", `${paged.id}:seg-page`, () => new Promise<void>((r) => { finish = r; }));
           assert.notEqual((await startJob("preview", `${paged.id}:seg-other`, async () => {})).id, job.id, "two shots are previewed at the same time");
           await assert.rejects(revertPost(paged.id, async () => {}), /running job/, "a post with a running preview can't be reverted");
           finish();
-          while (getJob(job.id)!.status === "running") await new Promise((r) => setTimeout(r, 20));
+          await finished(job.id);
           takes.clear();
           await assert.rejects(previewPage(paged.id, "portrait", "missing", () => {}, views), /Only a webpage shot/);
           const good = "<title>Example Film</title><p>Example Film</p>", bad = "<title>Ad</title><p>Ad</p>";

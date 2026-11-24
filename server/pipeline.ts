@@ -1104,15 +1104,14 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
       seg.capturedAt = Date.now();
       ok++;
     } catch (err) {
-      // A cancelled shot keeps its previous take.
-      if (err instanceof CancelledError) { cancelled = true; break; }
+      // A cancelled shot keeps its previous take, error and view. A shot that fails while the task is cancelled counts as cancelled.
+      if (err instanceof CancelledError || currentJobSignal()?.aborted) { cancelled = true; break; }
       seg.captureError = (err as Error).message;
       failed++;
       problem = seg.captureError;
       log(`  failed: ${seg.captureError}`);
     }
-    // A shot that fails because the task is cancelled keeps its view.
-    if (!page || !trace || (problem && currentJobSignal()?.aborted)) continue;
+    if (!page || !trace) continue;
     // The view only explains the result, so a problem with it never changes whether the shot counts as captured.
     const of = { postId: epId, format, segmentId: seg.id };
     // Once the page was filmed, its failures are over, also when the footage fails to encode or upload. A preview that

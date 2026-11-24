@@ -3,10 +3,10 @@ import { DEFAULT_PAGE_HEADERS, parseHeaders } from "../../../shared/projects.js"
 import { projectId } from "../../context.js";
 import { throwIfCancelled } from "../../jobs.js";
 import { getProject } from "../../projects.js";
-import { getSuggestions, getValue, loadPost, setValue } from "../../store.js";
+import { getSuggestions, getValue, setValue } from "../../store.js";
 import { pageUrl } from "./index.js";
 import { checkPage, isSourceShot } from "./verify.js";
-import { clearPageView, dropPageViews, pageView, savePageView, viewSummary, type ViewIO } from "./views.js";
+import { clearPageView, pageView, pruneViews, savePageView, viewSummary, type ViewIO } from "./views.js";
 import { PageTrace } from "./trace.js";
 import { feedTexts, textNamesLink } from "../../ingress/feeds.js";
 
@@ -65,10 +65,8 @@ export async function pageChecks(post: Post, format: keyof Post["scripts"]): Pro
 }
 
 /** Removes the views nobody sees any more: their segment is gone or films another address. */
-export async function prunePageViews(postId: string, format: keyof Post["scripts"], io?: ViewIO) {
-  const shots = new Map(pageShots(await loadPost(projectId(), postId), format).map((s) => [s.segmentId, s.url]));
-  await dropPageViews(postId, format, (view, segmentId) => shots.get(segmentId) !== view.url, io);
-}
+export const prunePageViews = (postId: string, format: keyof Post["scripts"], io?: ViewIO) =>
+  pruneViews(postId, format, (post) => new Map(pageShots(post, format).map((s) => [s.segmentId, s.url])), io);
 
 /** Opens every webpage shot's page without filming it, and keeps what each showed. */
 export async function checkPostLinks(post: Post, format: keyof Post["scripts"], log: (line: string) => void, views?: ViewIO) {

@@ -343,10 +343,10 @@ async function checkPageOnce(url: string, shot: Pick<PageShot, "credit" | "expec
       await noteMoment(page, moments, "after the cookie choice");
       await opts.trace?.step(page, "cookies", [`Clicked “${refused}”`]);
     }
-    if (opts.trace) await newlyHidden(page);
+    await opts.trace?.notes(() => newlyHidden(page));
     if (await hideNotices(page).catch(() => 0)) {
       await noteMoment(page, moments, "after notices were hidden");
-      await opts.trace?.step(page, "hidden", await hiddenNotes(page, []));
+      if (opts.trace) await opts.trace.step(page, "hidden", await opts.trace.notes(() => hiddenNotes(page, [])));
     }
     const check = await inspectPage(page, url, response, shot, moments);
     if (!check.ok) return await failed(check);
