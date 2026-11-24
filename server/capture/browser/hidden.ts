@@ -1,4 +1,9 @@
 import type { Page } from "puppeteer-core";
+import { inTime } from "./look.js";
+
+/** Each query walks through the whole page and has its own limit, so a slow one on a large page leaves the others. */
+const NOTE_MS = 2000;
+const ask = async <T>(page: Page, expression: string): Promise<T[]> => (await inTime(page.evaluate(expression) as Promise<T[]>, Date.now() + NOTE_MS)) ?? [];
 
 /** How many elements a note names before it only counts the rest. */
 const NAMED = 8;
@@ -26,12 +31,12 @@ function list(label: string, elements: string[]): string[] {
  * messages in ad slots are hidden. A site's own such elements are seen by a first call before anything is hidden.
  */
 export const newlyHidden = (page: Page) =>
-  page.evaluate(`(() => {
+  ask<string>(page, `(() => {
     const seen = (window.__devlogHidden = window.__devlogHidden || new WeakSet());
     const fresh = [...document.querySelectorAll("[style*=display]")].filter((el) => el.style.display === "none" && el.style.getPropertyPriority("display") === "important" && !seen.has(el));
     fresh.forEach((el) => seen.add(el));
     return fresh.map(${DESCRIBE});
-  })()`).catch(() => []) as Promise<string[]>;
+  })()`);
 
 /** Marks of the style elements, so the notes below find their rules: the ad rules, and each selector under Hide. */
 export const AD_STYLE = "ads";
@@ -39,21 +44,21 @@ export const HIDE_STYLE = "hide";
 
 /** The outermost elements that the rules of the marked style element hide. */
 const hiddenByAdRules = (page: Page) =>
-  page.evaluate(`(() => {
+  ask<string>(page, `(() => {
     const sheet = document.querySelector('style[data-devlog="${AD_STYLE}"]')?.sheet;
     const matched = new Set([...(sheet ? sheet.cssRules : [])].filter((r) => r.style && r.style.display === "none").flatMap((r) => [...document.querySelectorAll(r.selectorText)]));
     return [...matched].filter((el) => !/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|LINK|META)$/.test(el.tagName) && getComputedStyle(el).display === "none" && ![...matched].some((other) => other !== el && other.contains(el))).map(${DESCRIBE});
-  })()`).catch(() => []) as Promise<string[]>;
+  })()`);
 
 /**
  * How many elements each selector under Hide matches, in order; -1 when Chrome dropped its rule. The rule is read from
  * the style sheet, because querySelectorAll accepts some selectors that a style sheet doesn't.
  */
 const hideMatches = (page: Page) =>
-  page.evaluate(`[...document.querySelectorAll('style[data-devlog="${HIDE_STYLE}"]')].map((style) => {
+  ask<number>(page, `[...document.querySelectorAll('style[data-devlog="${HIDE_STYLE}"]')].map((style) => {
     const rules = style.sheet ? style.sheet.cssRules : [];
     return rules.length === 1 && rules[0].selectorText ? document.querySelectorAll(rules[0].selectorText).length : -1;
-  })`).catch(() => []) as Promise<number[]>;
+  })`);
 
 /** What was hidden, for the step in which notices, ads and the elements under Hide are hidden. */
 export async function hiddenNotes(page: Page, hide: string[]): Promise<string[]> {
@@ -70,12 +75,12 @@ export async function hiddenNotes(page: Page, hide: string[]): Promise<string[]>
  * state such as :hover or a part of an element are left out.
  */
 export async function unusedSelectors(page: Page, css: string): Promise<string[]> {
-  const unused = await (page.evaluate(`(() => {
+  const unused = await ask<string>(page, `(() => {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(${JSON.stringify(css)});
     const selectors = (rules) => [...rules].flatMap((r) => r.selectorText ? [r.selectorText] : r instanceof CSSMediaRule && matchMedia(r.conditionText).matches ? selectors(r.cssRules) : []);
     const unused = (selector) => { try { return !document.querySelector(selector); } catch { return false; } };
     return selectors(sheet.cssRules).filter((s) => !/::|:(hover|focus|active|visited|target|before|after|first-line|first-letter)/.test(s) && unused(s));
-  })()`).catch(() => []) as Promise<string[]>);
+  })()`);
   return unused.map((selector) => `CSS “${selector}” matches nothing`);
 }

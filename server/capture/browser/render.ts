@@ -162,7 +162,7 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     await noteMoment(page, moments, "after notices, ads and the elements under Hide were hidden");
     if (opts.trace) {
       const notes = await opts.trace.notes(() => hiddenNotes(page, hide));
-      if (notes.length) await opts.trace.step(page, "hidden", notes);
+      if (notes.length || notices || pleas || hide.length) await opts.trace.step(page, "hidden", notes);
     }
     // A shot's script can reveal the sentence to highlight, for example by opening a tab, so with a script the
     // sentence is looked for once the script has run (below), not in the page as it loads.

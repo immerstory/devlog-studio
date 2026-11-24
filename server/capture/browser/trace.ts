@@ -1,10 +1,7 @@
 import type { CDPSession, Page } from "puppeteer-core";
 import type { PageShot, PageStep, PageStepName } from "../../../shared/types.js";
-import { inTime, lookAt, type PageLook } from "./look.js";
+import { lookAt, type PageLook } from "./look.js";
 import { readable } from "./verify.js";
-
-/** Notes walk through the whole page, which takes longer on a large one. */
-const NOTES_MS = 2000;
 
 /** A step of a run, with its picture still in memory. */
 export type TracedStep = Omit<PageStep, "picture" | "text"> & PageLook;
@@ -48,9 +45,9 @@ export class PageTrace {
     this.add(name, look, notes);
   }
 
-  /** Notes about the page, or none when it doesn't answer soon. */
+  /** Notes about the page. A page that doesn't answer isn't asked. */
   async notes(ask: () => Promise<string[]>): Promise<string[]> {
-    return (!this.hangs && (await inTime(ask(), Date.now() + NOTES_MS))) || [];
+    return this.hangs ? [] : ask();
   }
 
   /** The moment a run failed. The run shows nothing when the page didn't load. */
