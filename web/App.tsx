@@ -59,7 +59,7 @@ export function App() {
     {hash === "#/settings" ? <GlobalSettingsPage /> : selected ? <ProjectContent key={selected.id} project={selected} path={match?.[2] ?? "/calendar"} reloadProjects={reloadProjects} onState={rememberPosts} /> : <p className="muted pad">{projects?.length === 0 ? "Create a project to get started." : "Loading…"}</p>}
     <JobDock
       titleFor={(job: Job) => {
-        // A subject names the project, then the post, and for a task of one segment also the segment.
+        // A subject names the project, then the post, and for a task of one segment also the segment and the format.
         const subject = job.subject?.split(":")[1];
         const post = subject ? postTitles[subject] : undefined;
         const project = projects?.find((p) => p.id === job.projectId);

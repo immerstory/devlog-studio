@@ -419,11 +419,11 @@ projectApi.put(
   }),
 );
 
-/** A task of a post, or of one of its segments with `perSegment`. */
+/** A task of a post, or with `perSegment` of one of its segments in one format. */
 const epJob = (kind: string, work: (req: Request, log: (l: string) => void) => Promise<unknown>, perSegment = false) => h(async (req) => {
   if ("format" in req.params) fmt(req);
   await loadPost(projectId(), param(req, "id"));
-  return startJob(kind, perSegment ? `${param(req, "id")}:${param(req, "seg")}` : param(req, "id"), (log) => work(req, log));
+  return startJob(kind, perSegment ? `${param(req, "id")}:${param(req, "seg")}:${param(req, "format")}` : param(req, "id"), (log) => work(req, log));
 });
 
 projectApi.get("/posts/:id/links/:format", h(async (req) => pageChecks(await loadPost(projectId(), param(req, "id")), fmt(req))));
