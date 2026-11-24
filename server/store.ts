@@ -70,12 +70,24 @@ export const updateValue = <T>(pid: string, key: string, fn: (value: T | undefin
 export async function setValue(pid: string, key: string, value: unknown) {
   await projectWrite(pid, async (c) => { await c.query("INSERT INTO settings VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [`project:${pid}:${key}`, JSON.stringify(value)]); });
 }
-export async function deleteValue(pid: string, key: string) {
-  await projectWrite(pid, async (c) => { await c.query("DELETE FROM settings WHERE key = $1", [`project:${pid}:${key}`]); });
-}
+/** Sets a project value and returns the one it replaces, in one locked step, so every value that goes is returned to exactly one caller. */
+export const replaceValue = <T>(pid: string, key: string, value: T) =>
+  projectWrite(pid, async (c) => {
+    const before = (await c.query<{ value: T }>("SELECT value FROM settings WHERE key = $1", [`project:${pid}:${key}`])).rows[0]?.value;
+    await c.query("INSERT INTO settings VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [`project:${pid}:${key}`, JSON.stringify(value)]);
+    return before;
+  });
+/** Removes the project values under a prefix that `only` accepts and returns them, in one locked step. `only` gets the rest of the key. */
+export const takeValues = <T>(pid: string, prefix: string, only: (value: T, rest: string) => boolean) =>
+  projectWrite(pid, async (c) => {
+    const start = `project:${pid}:${prefix}`;
+    const rows = (await c.query<{ key: string; value: T }>("SELECT key, value FROM settings WHERE starts_with(key, $1)", [start])).rows.filter((r) => only(r.value, r.key.slice(start.length)));
+    if (rows.length) await c.query("DELETE FROM settings WHERE key = ANY($1)", [rows.map((r) => r.key)]);
+    return rows.map((r) => r.value);
+  });
 const pageViewPrefix = (postId: string) => `pageView:${postId}:`;
-/** Where the view of a webpage shot's latest failure is kept. */
-export const pageViewKey = (postId: string, format: Format, segmentId: string) => `${pageViewPrefix(postId)}${format}:${segmentId}`;
+/** Where the views of one format's webpage shots are kept, by segment. */
+export const pageViewsOf = (postId: string, format: Format) => `${pageViewPrefix(postId)}${format}:`;
 export const getSnapshot = (pid: string) => getValue<Record<string, Snapshot>>(pid, "snapshot");
 export const setSnapshot = (pid: string, s: Record<string, Snapshot>) => setValue(pid, "snapshot", s);
 async function records<T>(pid: string, table: string, ids?: string[], lock?: pg.PoolClient): Promise<T[]> {

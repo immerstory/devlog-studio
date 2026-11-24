@@ -11,14 +11,15 @@ export interface PageLook {
   picture?: Buffer;
 }
 
-/** A page that hangs must not hold up the run that looks at it. */
-const LOOK_TIMEOUT_MS = 5000;
+/** A page that hangs must not hold up the run that looks at it for longer than this. */
+const LOOK_MS = 5000;
 /** Long enough for an article, short enough to store with every shot. */
 const MAX_TEXT = 20_000;
 
-const inTime = <T>(work: Promise<T>): Promise<T | undefined> => {
+/** The result of `work`, or undefined when it fails or isn't there in time. */
+const inTime = <T>(work: Promise<T>, until: number): Promise<T | undefined> => {
   let timer: NodeJS.Timeout;
-  const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), LOOK_TIMEOUT_MS); });
+  const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), Math.max(0, until - Date.now())); });
   return Promise.race([work.catch(() => undefined), late]).finally(() => clearTimeout(timer));
 };
 
@@ -30,9 +31,10 @@ const inTime = <T>(work: Promise<T>): Promise<T | undefined> => {
 export async function lookAt(page: Page, pausedClock?: CDPSession): Promise<PageLook | undefined> {
   const pageUrl = page.url();
   if (!/^https?:/.test(pageUrl)) return undefined;
-  if (pausedClock) await inTime(pausedClock.send("Emulation.setVirtualTimePolicy", { policy: "advance" }));
-  const read = await inTime(page.evaluate(`({ title: document.title, text: document.body ? document.body.innerText : "" })`) as Promise<{ title: string; text: string }>);
-  const picture = await inTime(page.screenshot({ type: "jpeg", quality: 75, captureBeyondViewport: false }));
+  const until = Date.now() + LOOK_MS;
+  if (pausedClock) await inTime(pausedClock.send("Emulation.setVirtualTimePolicy", { policy: "advance" }), until);
+  const read = await inTime(page.evaluate(`({ title: document.title, text: document.body ? document.body.innerText : "" })`) as Promise<{ title: string; text: string }>, until);
+  const picture = await inTime(page.screenshot({ type: "jpeg", quality: 75, captureBeyondViewport: false }), until);
   if (!read && !picture) return undefined;
   const text = (read?.text ?? "").replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim();
   return { pageUrl, title: (read?.title ?? "").slice(0, 200), text: text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text, ...(picture ? { picture: Buffer.from(picture) } : {}) };

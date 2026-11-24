@@ -2,53 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import puppeteer, { type Browser, type CDPSession, type Page } from "puppeteer-core";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { Browser as BrowserKind, computeExecutablePath, install } from "@puppeteer/browsers";
-import { CACHE_DIR } from "../../config.js";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
+import { currentJobSignal } from "../../jobs.js";
+import { chromePath } from "./chrome.js";
 import { coveringDialog, coveringPaywall, hideNotices, inspectPage, noteMoment, refuseConsent, waitForSentence, type PageMoment } from "./verify.js";
 import { lookAt, type PageLook } from "./look.js";
 import { highlightScript } from "./highlight.js";
 import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
 import { isReplacedPage, retryReplacedPage, SCRIPT_LEFT_PAGE, ScriptError } from "./replaced-page.js";
-
-/** The Chrome build this version of Puppeteer is made for. */
-const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
-
-/** The download in progress, which captures that start meanwhile share. */
-let installing: Promise<void> | undefined;
-
-/** Path of the Chrome headless shell, downloaded on first use. */
-export async function chromePath(): Promise<string> {
-  const executable = computeExecutablePath(CHROME);
-  if (!fs.existsSync(executable)) await (installing ??= installChrome(executable).finally(() => { installing = undefined; }));
-  return executable;
-}
-
-/**
- * Downloads Chrome into a folder of its own and moves the finished build into place, so another process that downloads
- * it too never writes the same files, and a download that breaks off leaves no partial build behind.
- */
-async function installChrome(executable: string) {
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  const folder = fs.mkdtempSync(path.join(CACHE_DIR, "chrome-download-"));
-  try {
-    await install({ ...CHROME, cacheDir: folder });
-    // The build's folder is the second level: browser, then platform and version.
-    const build = path.join(...path.relative(CHROME.cacheDir, executable).split(path.sep).slice(0, 2));
-    const place = path.join(CHROME.cacheDir, build);
-    if (fs.existsSync(executable)) return;
-    fs.mkdirSync(path.dirname(place), { recursive: true });
-    fs.rmSync(place, { recursive: true, force: true });
-    try {
-      fs.renameSync(path.join(folder, build), place);
-    } catch (err) {
-      // Another process can have moved its build there in the meantime.
-      if (!fs.existsSync(executable)) throw err;
-    }
-  } finally {
-    fs.rmSync(folder, { recursive: true, force: true });
-  }
-}
 
 /** CSS viewport width per device and orientation; the height follows the video's aspect ratio. */
 const VIEWPORT_WIDTH: Record<PageDevice, { portrait: number; landscape: number }> = {
@@ -361,7 +322,8 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
       },
     };
   } catch (err) {
-    opts.onLook?.(opened && (await lookAt(opened, pausedClock)));
+    // A cancelled run shows nothing, so it ends without a look.
+    if (!currentJobSignal()?.aborted) opts.onLook?.(opened && (await lookAt(opened, pausedClock)));
     await browser?.close().catch(() => {});
     // After a shot's script ran, a page that is gone counts as the script leaving it, so it isn't opened again.
     throw scriptRan && isReplacedPage(err) ? new ScriptError(SCRIPT_LEFT_PAGE) : err;

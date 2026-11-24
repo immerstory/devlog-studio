@@ -1,6 +1,7 @@
 import puppeteer, { type HTTPResponse, type Page } from "puppeteer-core";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
-import { blockedReason, chromePath, PHONE_AGENT } from "./render.js";
+import { blockedReason, PHONE_AGENT } from "./render.js";
+import { chromePath } from "./chrome.js";
 import { blockAds } from "./ads.js";
 import { lookAt, type PageLook } from "./look.js";
 import { isReplacedPage, REPLACED_PAGE, ReplacedPageError, retryReplacedPage } from "./replaced-page.js";
@@ -279,15 +280,16 @@ export async function inspectPage(page: Page, requested: string, response: HTTPR
   const blocked = await blockedReason(page, status);
   const dialog = await coveringDialog(page).catch(() => undefined);
   const paywall = await coveringPaywall(page).catch(() => undefined);
+  const missing = found === false ? `The page doesn't show “${expect}”.${lost}${littleText(shown)}`
+    : highlightFound === false ? `The page doesn't show the sentence to highlight (“${highlight}”).${lost}${littleText(shown)}`
+    : undefined;
   const problem = blocked ? `The site blocked the automated browser (${blocked}).`
     : dialog ? `A cookie dialog still covers the page (“${dialog}…”). Hide it with a CSS selector under Hide.`
     : paywall ? `A paywall covers the page (“${paywall}…”). Show this source on a slide instead.`
     : status && status >= 400 ? `The page answered HTTP ${status}.`
     : moved && isSourceShot(shot) ? `The link now leads to ${moved}.`
-    : found === false ? `The page doesn't show “${expect}”.${lost}${littleText(shown)}`
-    : highlightFound === false ? `The page doesn't show the sentence to highlight (“${highlight}”).${lost}${littleText(shown)}`
-    : undefined;
-  return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}), ...(problem && lost ? { lost: true } : {}) };
+    : missing;
+  return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}), ...(missing && problem === missing && lost ? { lost: true } : {}) };
 }
 
 interface CheckPageOptions { userAgent?: string; headers?: Record<string, string>; device?: PageDevice; log?: (line: string) => void; /** Gets what the browser showed when the check failed. */ onLook?: (look: PageLook | undefined) => void }

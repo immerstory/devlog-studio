@@ -3,10 +3,10 @@ import { DEFAULT_PAGE_HEADERS, parseHeaders } from "../../../shared/projects.js"
 import { projectId } from "../../context.js";
 import { throwIfCancelled } from "../../jobs.js";
 import { getProject } from "../../projects.js";
-import { getSuggestions, getValue, setValue } from "../../store.js";
+import { getSuggestions, getValue, loadPost, setValue } from "../../store.js";
 import { pageUrl } from "./index.js";
 import { checkPage, isSourceShot } from "./verify.js";
-import { clearPageView, pageView, savePageView, type ViewIO } from "./views.js";
+import { clearPageView, dropPageViews, pageView, savePageView, type ViewIO } from "./views.js";
 import type { PageLook } from "./look.js";
 import { feedTexts, textNamesLink } from "../../ingress/feeds.js";
 
@@ -64,9 +64,18 @@ export async function pageChecks(post: Post, format: keyof Post["scripts"]): Pro
   return { checks, views, unlisted: [...await unlistedShots(post, shots)] };
 }
 
+/** Removes the views nobody sees any more: their segment is gone or films another address. */
+export async function prunePageViews(postId: string, format: keyof Post["scripts"], io?: ViewIO) {
+  const shots = new Map(pageShots(await loadPost(projectId(), postId), format).map((s) => [s.segmentId, s.url]));
+  await dropPageViews(postId, format, (view, segmentId) => shots.get(segmentId) !== view.url, io);
+}
+
 /** Opens every webpage shot's page without filming it, and keeps what each showed. */
 export async function checkPostLinks(post: Post, format: keyof Post["scripts"], log: (line: string) => void, views?: ViewIO) {
   const shots = pageShots(post, format);
+  // The views only explain the results, so a problem with them never stops the checks.
+  const unkept = (err: Error) => log(`  What the browser saw wasn't kept: ${err.message}`);
+  await prunePageViews(post.id, format, views).catch(unkept);
   if (!shots.length) { log("This script has no webpage shots."); return { checked: 0, failed: 0 }; }
   let failed = 0;
   const unlisted = await unlistedShots(post, shots);
@@ -78,8 +87,10 @@ export async function checkPostLinks(post: Post, format: keyof Post["scripts"], 
     const check = await checkPage(s.url, s.shot, { onLook: (seen) => { look = seen; }, userAgent: s.target.userAgent, headers: parseHeaders(s.target.headers ?? DEFAULT_PAGE_HEADERS), device: s.device, log: (line) => log(`  ${line}`) });
     await savePageCheck(check);
     // A check that passes says nothing about a shot that failed while it was filmed.
-    if (check.problem && look) await savePageView(of, { url: s.url, by: "check", problem: check.problem }, look, views);
-    else await clearPageView(of, "check", views);
+    await (check.problem && look
+      ? savePageView(of, { url: s.url, by: "check", problem: check.problem }, look, views)
+      : clearPageView(of, (view) => view.by === "check", views)
+    ).catch(unkept);
     if (check.ok) log(`  OK${check.title ? `: “${check.title}”` : ""}`);
     else { failed++; log(`  ${check.problem}`); }
     if (unlisted.has(s.segmentId)) log("  The feed entries behind this post don't name this link. Check that it is the article the segment cites.");
