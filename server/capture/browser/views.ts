@@ -1,4 +1,4 @@
-import type { Format, PageStep, PageView } from "../../../shared/types.js";
+import type { Format, PageStep, PageView, Post } from "../../../shared/types.js";
 import { projectId } from "../../context.js";
 import { getValue, newId, pageViewsOf, replaceValue, takeValues } from "../../store.js";
 import { deleteKey, putBuffer } from "../../storage.js";
@@ -32,6 +32,11 @@ async function removePictures(views: Array<PageView | undefined>, io: ViewIO) {
  */
 export async function dropPageViews(postId: string, format: Format, gone: (view: PageView, segmentId: string) => boolean, io = storage) {
   await removePictures(await takeValues<PageView>(projectId(), pageViewsOf(postId, format), gone), io);
+}
+
+/** Removes the views of a post's format whose shot, in the post as it is then, isn't at the view's address. `addresses` gives the shots' addresses by segment. */
+export async function pruneViews(postId: string, format: Format, addresses: (post: Post) => Map<string, string>, io = storage) {
+  await removePictures(await takeValues<PageView>(projectId(), pageViewsOf(postId, format), (view, segmentId, post) => addresses(post!).get(segmentId) !== view.url, postId), io);
 }
 
 /** Forgets a shot's view. A view that `only` doesn't accept stays. */

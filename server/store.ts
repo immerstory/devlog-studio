@@ -77,11 +77,15 @@ export const replaceValue = <T>(pid: string, key: string, value: T) =>
     await c.query("INSERT INTO settings VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [`project:${pid}:${key}`, JSON.stringify(value)]);
     return before;
   });
-/** Removes the project values under a prefix that `only` accepts and returns them, in one locked step. `only` gets the rest of the key. */
-export const takeValues = <T>(pid: string, prefix: string, only: (value: T, rest: string) => boolean) =>
+/**
+ * Removes the project values under a prefix that `only` accepts and returns them, in one locked step. `only` gets the
+ * rest of the key, and with `postId` the post as it is in that step.
+ */
+export const takeValues = <T>(pid: string, prefix: string, only: (value: T, rest: string, post?: Post) => boolean, postId?: string) =>
   projectWrite(pid, async (c) => {
     const start = `project:${pid}:${prefix}`;
-    const rows = (await c.query<{ key: string; value: T }>("SELECT key, value FROM settings WHERE starts_with(key, $1)", [start])).rows.filter((r) => only(r.value, r.key.slice(start.length)));
+    const post = postId ? (await records<Post>(pid, "posts", [postId], c))[0] : undefined;
+    const rows = (await c.query<{ key: string; value: T }>("SELECT key, value FROM settings WHERE starts_with(key, $1)", [start])).rows.filter((r) => only(r.value, r.key.slice(start.length), post));
     if (rows.length) await c.query("DELETE FROM settings WHERE key = ANY($1)", [rows.map((r) => r.key)]);
     return rows.map((r) => r.value);
   });
