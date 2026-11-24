@@ -44,6 +44,7 @@ import {
   updateSuggestions,
 } from "./store.js";
 import { renderCapture, captureOperation, createCaptureSession, resolveTarget } from "./capture/provider.js";
+import { prunePageViews } from "./capture/browser/checks.js";
 import { previewShot } from "./capture/browser/preview.js";
 import { PageTrace } from "./capture/browser/trace.js";
 import { clearPageView, savePageView, type ViewIO } from "./capture/browser/views.js";
@@ -51,7 +52,7 @@ import { clearPageView, savePageView, type ViewIO } from "./capture/browser/view
 import { narrate } from "./tts.js";
 import { buildTimeline, chapters, estimatedSpeechMs, toSrt } from "./timeline.js";
 import { renderVideo } from "./render.js";
-import { deleteKey, deletePrefix, putFile } from "./storage.js";
+import { deleteKey, deletePrefix, putBuffer, putFile } from "./storage.js";
 import { CancelledError, currentJobSignal, listJobs, throwIfCancelled } from "./jobs.js";
 import { uploadCaptions, uploadVideo } from "./youtube.js";
 import { limitImported, materialsForAgent, progressMaterials } from "./materials.js";
@@ -625,7 +626,7 @@ export async function revertPost(id: string, removeFiles = deletePrefix): Promis
   const post = await loadPost(pid, id);
   if ((await listUploads(pid, id)).some((u) => u.upload.videoId)) throw Object.assign(new Error("A video of this post is on YouTube, so the post stays."), { status: 409 });
   if ((await listPublications(pid, id)).some((p) => p.state === "published" || p.state === "publishing")) throw Object.assign(new Error("This post has already been published somewhere, so it stays."), { status: 409 });
-  if (listJobs().some((j) => j.status === "running" && j.subject === `${pid}:${id}`)) throw Object.assign(new Error("Wait for the post's running job to finish."), { status: 409 });
+  if (listJobs().some((j) => j.status === "running" && (j.subject === `${pid}:${id}` || j.subject?.startsWith(`${pid}:${id}:`)))) throw Object.assign(new Error("Wait for the post's running job to finish."), { status: 409 });
   const suggestionIds = await deletePost(pid, id);
   await deletePostPublications(pid, id);
   await removeFiles(`episodes/${id}/`).catch(() => {});
@@ -1017,17 +1018,27 @@ function segmentSeconds(seg: Segment) {
   return Math.min(12, Math.max(4, estimatedSpeechMs(seg) / 1000 + 1.5));
 }
 
+/** A segment's footage in frames. */
+function segmentLength(seg: Segment) {
+  const fps = config().render.fps;
+  return { frames: Math.round(segmentSeconds(seg) * fps), fps };
+}
+
+/** Where takes and the pictures of page views are kept. */
+export interface CaptureIO extends ViewIO { putFile(key: string, file: string): Promise<void> }
+const captureStorage: CaptureIO = { putBuffer, putFile, deleteKey };
+
 /** Deletes a take's media and its poster frame. */
-async function removeTakeFiles(media: string) {
-  await deleteKey(media).catch(() => {});
-  if (/\.mp4$/.test(media)) await deleteKey(media.replace(/\.mp4$/, ".jpg")).catch(() => {});
+async function removeTakeFiles(media: string, io: CaptureIO) {
+  await io.deleteKey(media).catch(() => {});
+  if (/\.mp4$/.test(media)) await io.deleteKey(media.replace(/\.mp4$/, ".jpg")).catch(() => {});
 }
 
 /**
  * Goes back to a segment's previous take for one format: its media and the visual settings that produced
- * it. The current take is deleted.
+ * it. The current take is deleted, and with it what the browser saw when a capture failed after it.
  */
-export async function previousTake(epId: string, segmentId: string, format: Format) {
+export async function previousTake(epId: string, segmentId: string, format: Format, io = captureStorage) {
   let discarded: string | undefined;
   const post = await updatePost(projectId(), epId, (ep) => {
     const seg = ep.scripts[format]?.segments.find((s) => s.id === segmentId);
@@ -1041,32 +1052,32 @@ export async function previousTake(epId: string, segmentId: string, format: Form
     seg.captureError = undefined;
     if (back.visual) seg.visual = back.visual;
   });
-  if (discarded) await removeTakeFiles(discarded);
+  if (discarded) await removeTakeFiles(discarded, io);
+  await clearPageView({ postId: epId, format, segmentId }, (view) => view.by === "capture", io).catch(() => {});
   return post;
 }
 
-async function captureSegment(ep: Post, seg: Segment, format: Format, log: Log, capture = renderCapture, trace?: PageTrace): Promise<string | undefined> {
+async function captureSegment(ep: Post, seg: Segment, format: Format, log: Log, capture = renderCapture, io = captureStorage, trace?: PageTrace): Promise<string | undefined> {
   if (seg.visual.type !== "capture") return;
-  const fps = config().render.fps;
-  const result = await capture(seg.visual, { dir: path.join(CACHE_DIR, "captures", ep.id, `${seg.id}-${format}`), format, frames: Math.round(segmentSeconds(seg) * fps), fps, trace }, log);
+  const result = await capture(seg.visual, { dir: path.join(CACHE_DIR, "captures", ep.id, `${seg.id}-${format}`), format, ...segmentLength(seg), trace }, log);
   // Every capture gets its own key, so earlier takes stay available.
   const capturedAt = Date.now();
   const keyBase = `episodes/${ep.id}/captures/${seg.id}-${format}-${capturedAt.toString(36)}`;
   const key = keyBase + path.extname(result.file);
-  await putFile(key, result.file);
-  if (result.poster) { await putFile(`${keyBase}.jpg`, result.poster); fs.rmSync(result.poster, { force: true }); }
+  await io.putFile(key, result.file);
+  if (result.poster) { await io.putFile(`${keyBase}.jpg`, result.poster); fs.rmSync(result.poster, { force: true }); }
   fs.rmSync(result.file, { force: true });
   const current = seg.media?.[format];
   const takes = seg.takes?.[format] ?? (current ? [{ media: current, mediaSeconds: seg.mediaSeconds?.[format], capturedAt: seg.capturedAt ?? 0 }] : []);
   takes.push({ media: key, mediaSeconds: result.durationSeconds, capturedAt, visual: structuredClone(seg.visual) });
-  for (const dropped of takes.splice(0, Math.max(0, takes.length - MAX_TAKES))) await removeTakeFiles(dropped.media);
+  for (const dropped of takes.splice(0, Math.max(0, takes.length - MAX_TAKES))) await removeTakeFiles(dropped.media, io);
   seg.takes = { ...seg.takes, [format]: takes };
   seg.media = { ...seg.media, [format]: key };
   seg.mediaSeconds = { ...seg.mediaSeconds, [format]: result.durationSeconds };
   return result.warning;
 }
 
-export async function capturePost(epId: string, format: Format, log: Log, onlySegment?: string, views?: ViewIO) {
+export async function capturePost(epId: string, format: Format, log: Log, onlySegment?: string, io = captureStorage) {
   const session = createCaptureSession();
   const ep = await loadPost(projectId(), epId);
   const script = ep.scripts[format];
@@ -1074,6 +1085,7 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
   let ok = 0;
   let failed = 0;
   let cancelled = false;
+  const unkept = (err: Error) => log(`  What the browser saw wasn't kept: ${err.message}`);
   for (const seg of script.segments) {
     if (onlySegment && seg.id !== onlySegment) continue;
     if (seg.visual.type === "material") {
@@ -1087,7 +1099,7 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
     const trace = page && new PageTrace(page);
     let problem: string | undefined;
     try {
-      seg.captureError = await captureSegment(ep, seg, format, log, session.render, trace);
+      seg.captureError = await captureSegment(ep, seg, format, log, session.render, io, trace);
       if (seg.captureError) log(`  warning: ${seg.captureError}`);
       seg.capturedAt = Date.now();
       ok++;
@@ -1099,14 +1111,14 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
       problem = seg.captureError;
       log(`  failed: ${seg.captureError}`);
     }
-    if (!page || !trace) continue;
+    // A shot that fails because the task is cancelled keeps its view.
+    if (!page || !trace || (problem && currentJobSignal()?.aborted)) continue;
     // The view only explains the result, so a problem with it never changes whether the shot counts as captured.
     const of = { postId: epId, format, segmentId: seg.id };
-    // A shot that is captured is past its failures; a preview that showed no problem still shows the page.
-    await (problem && trace.failed
-      ? savePageView(of, { url: trace.url, by: "capture", problem }, trace, views)
-      : clearPageView(of, (view) => !!problem || !!view.problem, views))
-      .catch((err) => log(`  What the browser saw wasn't kept: ${(err as Error).message}`));
+    // Once the page was filmed, its failures are over, also when the footage fails to encode or upload. A preview that
+    // showed no problem still shows the page, unless the page no longer loads.
+    const unloaded = !!problem && !trace.steps.length;
+    await (problem && trace.failed ? savePageView(of, { url: trace.url, by: "capture", problem }, trace, io) : clearPageView(of, (view) => unloaded || !!view.problem, io)).catch(unkept);
   }
   // Merge capture results into the latest saved episode so concurrent edits survive.
   await updatePost(projectId(), epId, (fresh) => {
@@ -1121,6 +1133,7 @@ export async function capturePost(epId: string, format: Format, log: Log, onlySe
     }
     if (outputStage(fresh, format) === "script") setOutputStage(fresh, format, "capture");
   });
+  await prunePageViews(epId, format, io).catch(unkept);
   log(`Captured ${ok}, failed ${failed}.`);
   // Shots captured before the cancel are saved above; the job still ends as cancelled.
   if (cancelled) throw new CancelledError();
@@ -1132,7 +1145,7 @@ export async function previewPage(epId: string, format: Format, segmentId: strin
   if (seg?.visual.type !== "capture" || seg.visual.shot.model !== "page") throw new Error("Only a webpage shot can be previewed.");
   const target = resolveTarget(seg.visual.targetId);
   if (target.kind !== "browser") throw new Error("Shot model does not match the capture target");
-  const { trace, problem } = await previewShot(target.config, seg.visual.shot, format, segmentSeconds(seg), log);
+  const { trace, problem } = await previewShot(target.config, seg.visual.shot, format, segmentLength(seg), log);
   // Without a step there is nothing to show, so the task reports the problem.
   if (problem && !trace.steps.length) throw new Error(problem);
   await savePageView({ postId: epId, format, segmentId }, { url: trace.url, by: "preview", ...(problem ? { problem } : {}) }, trace, views);

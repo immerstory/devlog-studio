@@ -2,55 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import puppeteer, { type Browser, type CDPSession, type Page } from "puppeteer-core";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { Browser as BrowserKind, computeExecutablePath, install } from "@puppeteer/browsers";
-import { CACHE_DIR } from "../../config.js";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
+import { currentJobSignal } from "../../jobs.js";
+import { chromePath } from "./chrome.js";
 import { coveringDialog, coveringPaywall, hideNotices, inspectPage, loadNotes, noteMoment, refuseConsent, waitForSentence, type PageMoment } from "./verify.js";
-import { PAGE_TEXT, plainLines, type PageLook } from "./look.js";
+import { PAGE_TEXT, inTime, plainLines, type PageLook } from "./look.js";
 import type { PageTrace } from "./trace.js";
-import { AD_STYLE, hiddenNotes, newlyHidden, unusedSelectors } from "./hidden.js";
+import { AD_STYLE, HIDE_STYLE, hiddenNotes, newlyHidden, unusedSelectors } from "./hidden.js";
 import { highlightScript } from "./highlight.js";
 import { AD_CSS, blockAds, hideAdPleas } from "./ads.js";
 import { isReplacedPage, retryReplacedPage, SCRIPT_LEFT_PAGE, ScriptError } from "./replaced-page.js";
-
-/** The Chrome build this version of Puppeteer is made for. */
-const CHROME = { browser: BrowserKind.CHROMEHEADLESSSHELL, buildId: "155.0.8059.39", cacheDir: path.join(CACHE_DIR, "chrome") };
-
-/** The download in progress, which captures that start meanwhile share. */
-let installing: Promise<void> | undefined;
-
-/** Path of the Chrome headless shell, downloaded on first use. */
-export async function chromePath(): Promise<string> {
-  const executable = computeExecutablePath(CHROME);
-  if (!fs.existsSync(executable)) await (installing ??= installChrome(executable).finally(() => { installing = undefined; }));
-  return executable;
-}
-
-/**
- * Downloads Chrome into a folder of its own and moves the finished build into place, so another process that downloads
- * it too never writes the same files, and a download that breaks off leaves no partial build behind.
- */
-async function installChrome(executable: string) {
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  const folder = fs.mkdtempSync(path.join(CACHE_DIR, "chrome-download-"));
-  try {
-    await install({ ...CHROME, cacheDir: folder });
-    // The build's folder is the second level: browser, then platform and version.
-    const build = path.join(...path.relative(CHROME.cacheDir, executable).split(path.sep).slice(0, 2));
-    const place = path.join(CHROME.cacheDir, build);
-    if (fs.existsSync(executable)) return;
-    fs.mkdirSync(path.dirname(place), { recursive: true });
-    fs.rmSync(place, { recursive: true, force: true });
-    try {
-      fs.renameSync(path.join(folder, build), place);
-    } catch (err) {
-      // Another process can have moved its build there in the meantime.
-      if (!fs.existsSync(executable)) throw err;
-    }
-  } finally {
-    fs.rmSync(folder, { recursive: true, force: true });
-  }
-}
 
 /** CSS viewport width per device and orientation; the height follows the video's aspect ratio. */
 const VIEWPORT_WIDTH: Record<PageDevice, { portrait: number; landscape: number }> = {
@@ -118,8 +79,10 @@ export interface PageSession {
   run<T>(expression: string): Promise<T>;
   /** Advances page time by `ms` and saves a screenshot of the frame at the video's resolution. */
   frame(f: PageFrame, ms: number, file: string): Promise<void>;
-  /** What the page shows now, without a picture. The clock stays paused. */
-  read(): Promise<PageLook>;
+  /** Plays the page for `ms` at a scroll position without taking a frame: page time, or real time for a real-time session. */
+  play(scrollY: number, ms: number): Promise<void>;
+  /** What the page shows now and where it is scrolled to, without a picture. The clock stays paused. */
+  read(): Promise<PageLook & { scrollY: number }>;
   /** Records the failure of the session's run. The page's clock runs on from here, so nothing is filmed afterwards. */
   fail(): Promise<void>;
   close(): Promise<void>;
@@ -135,7 +98,7 @@ export function openPage(opts: OpenPageOptions): Promise<PageSession> {
   return retryReplacedPage(() => openPageOnce(opts), opts.log);
 }
 
-type OpenPageOptions = { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; /** Records what the browser shows at each step. */ trace?: PageTrace; log: (l: string) => void };
+type OpenPageOptions = { url: string; device: PageDevice; output: { width: number; height: number }; settleMs: number; hide: string[]; /** The target's CSS for every page, then the shot's own. */ css?: string[]; script?: string; userAgent?: string; headers?: Record<string, string>; source?: Pick<PageShot, "credit" | "expect" | "highlight">; highlight?: string; realtime?: boolean; onCheck?: (check: PageCheck) => Promise<void> | void; /** Records what the browser shows at each step. */ trace?: PageTrace; log: (l: string) => void };
 
 async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
   const orientation = opts.output.height > opts.output.width ? "portrait" : "landscape";
@@ -182,7 +145,7 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
       await noteMoment(page, moments, "after the cookie choice");
       await opts.trace?.step(page, "cookies", [`Clicked “${refused}”`]);
     }
-    if (opts.trace) await newlyHidden(page);
+    await opts.trace?.notes(() => newlyHidden(page));
     const notices = await hideNotices(page).catch(() => 0);
     const pleas = await hideAdPleas(page).catch(() => 0);
     if (pleas) opts.log(`Hid ${pleas} message(s) in empty ad slots.`);
@@ -191,10 +154,14 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     const hide = opts.hide.filter((s) => s.trim());
     const rules = await page.addStyleTag({ content: `html { scroll-behavior: auto !important; }\n${AD_CSS}` });
     await rules.evaluate((el, mark) => el.setAttribute("data-devlog", mark), AD_STYLE);
-    if (hide.length) await page.addStyleTag({ content: hide.map((s) => `${s} { display: none !important; }`).join("\n") });
+    // Each selector has a style element of its own, because an invalid one takes in the rules after it.
+    for (const selector of hide) {
+      const rule = await page.addStyleTag({ content: `${selector} { display: none !important; }` });
+      await rule.evaluate((el, mark) => el.setAttribute("data-devlog", mark), HIDE_STYLE);
+    }
     await noteMoment(page, moments, "after notices, ads and the elements under Hide were hidden");
     if (opts.trace) {
-      const notes = await hiddenNotes(page, hide);
+      const notes = await opts.trace.notes(() => hiddenNotes(page, hide));
       if (notes.length) await opts.trace.step(page, "hidden", notes);
     }
     // A shot's script can reveal the sentence to highlight, for example by opening a tab, so with a script the
@@ -211,10 +178,12 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
     }
     // Custom CSS goes in separate style elements, so a mistake in it cannot disable the rules above.
     const styled: string[] = [];
-    for (const custom of opts.css ?? []) {
+    for (const [i, custom] of (opts.css ?? []).entries()) {
       if (!custom.trim()) continue;
       await page.addStyleTag({ content: custom });
-      if (opts.trace) styled.push("Added CSS", ...(await unusedSelectors(page, custom)));
+      // The target's CSS is for every page, so rules that match nothing on this one are expected.
+      const own = i === opts.css!.length - 1;
+      styled.push(own ? "Added the shot's CSS" : "Added the target's CSS", ...((own && (await opts.trace?.notes(() => unusedSelectors(page, custom)))) || []));
     }
     // The shot's own script runs as a function body; an error in it fails the shot with its message.
     if (opts.script?.trim()) {
@@ -313,6 +282,14 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
       await expired;
     };
 
+    const scrollTo = (y: number) => run(`window.scrollTo(0, ${Number(y) || 0})`);
+    const play = async (scrollY: number, ms: number) => {
+      await scrollTo(scrollY);
+      if (opts.realtime) return void (await new Promise((r) => setTimeout(r, ms)));
+      await advance(ms);
+      await run(`window.__devlogStep(${ms})`);
+    };
+
     let lastFrame: Buffer | undefined;
     let stuck = 0;
     let repeated = 0;
@@ -333,11 +310,7 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
         return Math.max(0, y);
       },
       async frame(f, ms, file) {
-        await run(`window.scrollTo(0, ${Number(f.scrollY) || 0})`);
-        if (!opts.realtime) {
-          await advance(ms);
-          await run(`window.__devlogStep(${ms})`);
-        }
+        await (opts.realtime ? scrollTo(f.scrollY) : play(f.scrollY, ms));
         const zoom = Math.max(1, f.zoom);
         const w = opts.output.width / scale / zoom;
         const h = opts.output.height / scale / zoom;
@@ -377,9 +350,11 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, image);
       },
+      play,
       async read() {
-        const now = await run<{ title: string; text: string }>(PAGE_TEXT);
-        return { pageUrl: page.url(), title: now.title.slice(0, 200), text: plainLines(now.text) };
+        const now = await inTime(run<{ title: string; text: string; scrollY: number }>(`({ ...${PAGE_TEXT}, scrollY: window.scrollY })`), Date.now() + 5000);
+        if (!now) throw new Error("The page stopped answering.");
+        return { pageUrl: page.url(), title: now.title.slice(0, 200), text: plainLines(now.text), scrollY: now.scrollY };
       },
       fail: async () => opts.trace?.fail(page, pausedClock),
       async close() {
@@ -387,7 +362,8 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
       },
     };
   } catch (err) {
-    await opts.trace?.fail(opened, pausedClock);
+    // A cancelled run shows nothing, so it ends without a look.
+    if (!currentJobSignal()?.aborted) await opts.trace?.fail(opened, pausedClock);
     await browser?.close().catch(() => {});
     // After a shot's script ran, a page that is gone counts as the script leaving it, so it isn't opened again.
     throw scriptRan && isReplacedPage(err) ? new ScriptError(SCRIPT_LEFT_PAGE) : err;

@@ -8,7 +8,7 @@ import { DEFAULT_PAGE_HEADERS, parseHeaders, type BrowserTargetConfig } from "..
 import type { CaptureProvider, CaptureOutput, CaptureResult, Log } from "../provider.js";
 import { encodeSequence } from "../encoding.js";
 import { CancelledError, throwIfCancelled } from "../../jobs.js";
-import { openPage, type PageSession } from "./render.js";
+import { openPage, type PageFrame, type PageSession } from "./render.js";
 import type { PageTrace } from "./trace.js";
 import { savePageCheck } from "./checks.js";
 import { highlightScroll } from "./highlight.js";
@@ -39,10 +39,26 @@ export function openShot(target: BrowserTargetConfig, shot: PageShot, format: Fo
   return openPage({ url, trace, device: shot.device ?? defaultPageDevice(format), output: FORMAT_SIZE[format], settleMs: shot.settleMs ?? 1000, hide: shot.hide ?? [], css: [target.css ?? "", shot.css ?? ""], script: shot.script, userAgent: target.userAgent, headers: parseHeaders(target.headers ?? DEFAULT_PAGE_HEADERS), source: shot, highlight: shot.highlight, realtime: shot.realtime, onCheck, log });
 }
 
-/** Where a shot's scroll starts and ends. A highlighted sentence holds the page still around it; the scroll fields don't apply. */
-export async function shotScroll(session: PageSession, shot: PageShot): Promise<{ still?: number; from: number; to: number }> {
+/** A shot's frames: how many, how long each lasts, and what the view shows in them. */
+export interface ShotPath { from: number; to: number; frames: number; seconds: number; step: number; frame(i: number): Promise<PageFrame> }
+
+/** The frames a capture films and a preview takes its pictures from. A highlighted sentence holds the page still around it; the scroll fields don't apply. */
+export async function shotPath(session: Pick<PageSession, "run" | "scrollOf">, shot: PageShot, length: { frames: number; fps: number }): Promise<ShotPath> {
   const still = shot.highlight?.trim() ? await session.run<number>(highlightScroll) : undefined;
-  return { still, from: still ?? await session.scrollOf(shot.scrollFrom), to: still ?? await session.scrollOf(shot.scrollTo) };
+  const from = still ?? await session.scrollOf(shot.scrollFrom);
+  const to = still ?? await session.scrollOf(shot.scrollTo);
+  const frames = pageShotMoves(shot) ? Math.max(2, length.frames) : 1;
+  const seconds = (frames - 1) / length.fps;
+  return {
+    from, to, frames, seconds, step: 1000 / length.fps,
+    async frame(i) {
+      // The last frame lands on the end of the shot, so a move without a speed ends exactly there.
+      const t = frames === 1 ? 0 : pageMoveProgress(shot, (i / (frames - 1)) * seconds, seconds, Math.abs(to - from));
+      // Content that loads late above the sentence pushes it down, so a highlight follows it on every frame.
+      const scrollY = still === undefined ? from + (to - from) * t : await session.run<number>(highlightScroll);
+      return { scrollY, zoom: shot.zoomFrom + (shot.zoomTo - shot.zoomFrom) * t, focusX: shot.focus.x, focusY: shot.focus.y, rasterZoom: Math.max(shot.zoomFrom, shot.zoomTo) };
+    },
+  };
 }
 
 async function render(target: BrowserTargetConfig, shot: PageShot, out: CaptureOutput, log: Log): Promise<CaptureResult> {
@@ -53,23 +69,15 @@ async function render(target: BrowserTargetConfig, shot: PageShot, out: CaptureO
   fs.rmSync(frameDir, { recursive: true, force: true });
   const session = await openShot(target, shot, out.format, log, out.trace);
   try {
-    const { still, from, to } = await shotScroll(session, shot);
-    const frames = moving ? Math.max(2, out.frames) : 1;
-    const shotSeconds = (frames - 1) / out.fps;
-    const step = 1000 / out.fps;
+    const shown = await shotPath(session, shot, out);
+    const { from, to, frames, step, seconds: shotSeconds } = shown;
     log(moving ? `Filming ${frames} frames: scroll ${Math.round(from)} → ${Math.round(to)} px, zoom ${shot.zoomFrom} → ${shot.zoomTo}…` : "Taking a still of the page…");
     if (moving && shot.scrollSpeed && to !== from) {
       const needed = (shot.delaySeconds ?? 0) + Math.abs(to - from) / shot.scrollSpeed;
       if (needed > shotSeconds + 0.05) log(`  At ${shot.scrollSpeed} px/s the scroll needs ${needed.toFixed(1)} s, but the shot lasts ${shotSeconds.toFixed(1)} s: it stops partway.`);
     }
     const frameFile = (i: number) => path.join(frameDir, `f_${String(i).padStart(4, "0")}.png`);
-    const film = async (i: number) => {
-      // The last frame lands on the end of the shot, so a move without a speed ends exactly there.
-      const t = frames === 1 ? 0 : pageMoveProgress(shot, (i / (frames - 1)) * shotSeconds, shotSeconds, Math.abs(to - from));
-      // Content that loads late above the sentence pushes it down, so a highlight follows it on every frame.
-      const scrollY = still === undefined ? from + (to - from) * t : await session.run<number>(highlightScroll);
-      await session.frame({ scrollY, zoom: shot.zoomFrom + (shot.zoomTo - shot.zoomFrom) * t, focusX: shot.focus.x, focusY: shot.focus.y, rasterZoom: Math.max(shot.zoomFrom, shot.zoomTo) }, step, frameFile(i));
-    };
+    const film = async (i: number) => session.frame(await shown.frame(i), step, frameFile(i));
     let lastLogged = 0;
     const progress = (done: number) => {
       if (frames > 1 && (done - lastLogged >= 30 || done === frames)) { lastLogged = done; log(`  ${done}/${frames} frames`); }

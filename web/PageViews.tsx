@@ -48,13 +48,15 @@ function PageViewDialog({ view, loadView, onClose }: { view: PageView; loadView:
     loadView().then((loaded) => { if (open) setFull(loaded ?? view); }, (e) => { if (open) setError((e as Error).message); });
     return () => { open = false; };
   }, [view.at]);
-  const steps = stepsOf(full ?? view);
+  // A run that ended in between replaced the view, so everything here comes from the one that loaded.
+  const shown = full ?? view;
+  const steps = stepsOf(shown);
   const index = Math.min(chosen ?? steps.length - 1, steps.length - 1);
   const step = steps[index];
-  const when = occasion(view);
+  const when = occasion(shown);
   return (
-    <PopOutDialog title="What the browser sees" description={`${when[0].toUpperCase()}${when.slice(1)}, ${shortTime(view.at)}`} onClose={onClose}>
-      {view.problem ? <div className="error small">{view.problem}</div> : null}
+    <PopOutDialog title="What the browser sees" description={`${when[0].toUpperCase()}${when.slice(1)}, ${shortTime(shown.at)}`} onClose={onClose}>
+      {shown.problem ? <div className="error small">{shown.problem}</div> : null}
       <div className="page-steps">
         {steps.map((s, i) => (
           <button key={i} type="button" className={i === index ? "page-step chosen" : "page-step"} aria-pressed={i === index} onClick={() => setChosen(i)}>
@@ -63,7 +65,7 @@ function PageViewDialog({ view, loadView, onClose }: { view: PageView; loadView:
           </button>
         ))}
       </div>
-      <div className="page-step-view">
+      <div className={step.picture ? "page-step-view" : "page-step-view no-picture"}>
         {step.picture ? (
           <a href={mediaUrl(step.picture)} target="_blank" rel="noreferrer" title="Open the picture in full size"><img src={mediaUrl(step.picture)} alt={`The browser's view: ${STEP_LABEL[step.name]}`} /></a>
         ) : null}

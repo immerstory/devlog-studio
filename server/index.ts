@@ -419,15 +419,17 @@ projectApi.put(
   }),
 );
 
-const epJob = (kind: string, work: (req: Request, log: (l: string) => void) => Promise<unknown>) => h(async (req) => {
+/** A task of a post, or of one of its segments with `perSegment`. */
+const epJob = (kind: string, work: (req: Request, log: (l: string) => void) => Promise<unknown>, perSegment = false) => h(async (req) => {
+  if ("format" in req.params) fmt(req);
   await loadPost(projectId(), param(req, "id"));
-  return startJob(kind, param(req, "id"), (log) => work(req, log));
+  return startJob(kind, perSegment ? `${param(req, "id")}:${param(req, "seg")}` : param(req, "id"), (log) => work(req, log));
 });
 
 projectApi.get("/posts/:id/links/:format", h(async (req) => pageChecks(await loadPost(projectId(), param(req, "id")), fmt(req))));
 /** What the browser saw when a webpage shot last failed or was previewed, with the text of every step. */
 projectApi.get("/posts/:id/segments/:seg/page-view/:format", h(async (req) => (await pageView({ postId: (await loadPost(projectId(), param(req, "id"))).id, format: fmt(req), segmentId: param(req, "seg") })) ?? null));
-projectApi.post("/posts/:id/segments/:seg/page-preview/:format", epJob("preview", (req, log) => previewPage(param(req, "id"), fmt(req), param(req, "seg"), log)));
+projectApi.post("/posts/:id/segments/:seg/page-preview/:format", epJob("preview", (req, log) => previewPage(param(req, "id"), fmt(req), param(req, "seg"), log), true));
 projectApi.post("/posts/:id/links/:format", epJob("links", async (req, log) => checkPostLinks(await loadPost(projectId(), param(req, "id")), fmt(req), log)));
 projectApi.post("/posts/:id/images/:format", epJob("imagegen", (req, log) => generateSegmentImages(param(req, "id"), fmt(req), log, typeof req.body?.segmentId === "string" ? req.body.segmentId : undefined)));
 projectApi.post("/posts/:id/questions", epJob("questions", (req, log) => askQuestions(param(req, "id"), log, agentOf(req))));

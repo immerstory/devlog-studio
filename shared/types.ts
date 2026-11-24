@@ -353,7 +353,7 @@ export interface PageCheck {
   /** The sentence the shot highlights, checked like the expected text. */
   highlight?: string;
   problem?: string;
-  /** The text that is missing was on the page earlier in the same run. */
+  /** The problem is a missing text that was on the page earlier in the same run. */
   lost?: boolean;
 }
 
@@ -395,8 +395,8 @@ export interface PageView {
   /** The address the browser was at. */
   pageUrl: string;
   title: string;
-  /** The text a reader of the page could see, shortened when very long. */
-  text: string;
+  /** The text of a view without steps. */
+  text?: string;
   /** Storage key of a picture of the browser's view. Absent when the page produced none. */
   picture?: string;
 }

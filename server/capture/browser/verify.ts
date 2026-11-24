@@ -1,6 +1,7 @@
 import puppeteer, { type HTTPResponse, type Page } from "puppeteer-core";
 import type { PageCheck, PageDevice, PageShot } from "../../../shared/types.js";
-import { blockedReason, chromePath, PHONE_AGENT } from "./render.js";
+import { blockedReason, PHONE_AGENT } from "./render.js";
+import { chromePath } from "./chrome.js";
 import { blockAds } from "./ads.js";
 import { PAGE_TEXT } from "./look.js";
 import type { PageTrace } from "./trace.js";
@@ -120,13 +121,59 @@ const BACKDROPS = `[...document.querySelectorAll("body *")].filter((el) => {
 })`;
 
 /**
- * Hides the notices still floating over the page after the choice, their backdrops, and closable notice bars. Hiding
- * agrees to nothing. The value is how many it hid. An expression, so it also runs while the page clock is paused.
+ * Unlocks a page that can't scroll to the end of its content, the way dialogs lock it: the root and the body get
+ * visible vertical overflow, their natural height and their place in the flow, and the scroll position a fixed body
+ * kept in its offset comes back. Horizontal overflow stays clipped, because it keeps off-canvas menus out of view. A
+ * page that scrolls inside its own container, which can be the body, is left as it is. Every pass checks again,
+ * because a dialog's script can lock the page anew, but only a page whose styles can hold a lock is scrolled to find
+ * out. The scrolling is instant, because a smooth scroll leaves the position unchanged while the check reads it.
+ * Inline `!important` declarations win over the site's `!important` rules. The scroll position is the same
+ * afterwards, unless the unlock brought a kept one back.
+ */
+const UNLOCK_SCROLL = `(() => {
+    const root = document.documentElement, body = document.body;
+    if (!body) return;
+    const styles = [root, body].map((el) => getComputedStyle(el));
+    if (!styles.some((s) => s.position === "fixed" || /hidden|clip/.test(s.overflowY))) return;
+    const jump = (top) => scrollTo({ left: scrollX, top, behavior: "instant" });
+    // The scroll position the end of the content needs; a small shortfall is margins, not a lock.
+    const needed = Math.max(body.scrollHeight, body.getBoundingClientRect().height) - innerHeight - 100;
+    if (needed <= 0) return;
+    const y = scrollY;
+    jump(needed);
+    // Content heights can be fractions of a pixel, and the browser rounds the position it scrolls to.
+    const scrolls = scrollY >= needed - 1;
+    jump(y);
+    if (scrolls) return;
+    // The body scrolls by itself only when the root has its own overflow; otherwise the body's applies to the view.
+    const candidates = [...(styles[0].overflowY === "visible" ? [] : [body]), ...body.querySelectorAll("*")];
+    const ownScroller = candidates.some((el) => {
+      if (el.scrollHeight <= el.clientHeight + 1 || !/auto|scroll/.test(getComputedStyle(el).overflowY)) return false;
+      const b = el.getBoundingClientRect();
+      return b.width * b.height >= innerWidth * innerHeight * 0.5;
+    });
+    if (ownScroller) return;
+    const kept = getComputedStyle(body).position === "fixed" ? -parseFloat(getComputedStyle(body).top) || 0 : 0;
+    for (const el of [root, body]) {
+      const s = getComputedStyle(el);
+      if (/hidden|clip/.test(s.overflowY)) el.style.setProperty("overflow-y", "visible", "important");
+      if (s.position === "fixed") el.style.setProperty("position", "static", "important");
+      el.style.setProperty("height", "auto", "important");
+      el.style.setProperty("max-height", "none", "important");
+    }
+    if (kept > 0) jump(kept);
+  })()`;
+
+/**
+ * Hides the notices still floating over the page after the choice, their backdrops, and closable notice bars, and
+ * unlocks a page that can't scroll. Hiding agrees to nothing. The value is how many it hid. An expression, so it
+ * also runs while the page clock is paused.
  */
 export const HIDE_NOTICES = `(() => {
   const n = ${NOTICES};
   for (const x of n) x.el.style.setProperty("display", "none", "important");
   if (n.length) for (const el of ${BACKDROPS}) el.style.setProperty("display", "none", "important");
+  ${UNLOCK_SCROLL};
   const bars = ${NOTICE_BARS}.filter((el, i, all) => !all.some((other, j) => j !== i && el.contains(other)));
   for (const el of bars) el.style.setProperty("display", "none", "important");
   return n.length + bars.length;
@@ -234,15 +281,16 @@ export async function inspectPage(page: Page, requested: string, response: HTTPR
   const blocked = await blockedReason(page, status);
   const dialog = await coveringDialog(page).catch(() => undefined);
   const paywall = await coveringPaywall(page).catch(() => undefined);
+  const missing = found === false ? `The page doesn't show “${expect}”.${lost}${littleText(shown)}`
+    : highlightFound === false ? `The page doesn't show the sentence to highlight (“${highlight}”).${lost}${littleText(shown)}`
+    : undefined;
   const problem = blocked ? `The site blocked the automated browser (${blocked}).`
     : dialog ? `A cookie dialog still covers the page (“${dialog}…”). Hide it with a CSS selector under Hide.`
     : paywall ? `A paywall covers the page (“${paywall}…”). Show this source on a slide instead.`
     : status && status >= 400 ? `The page answered HTTP ${status}.`
     : moved && isSourceShot(shot) ? `The link now leads to ${moved}.`
-    : found === false ? `The page doesn't show “${expect}”.${lost}${littleText(shown)}`
-    : highlightFound === false ? `The page doesn't show the sentence to highlight (“${highlight}”).${lost}${littleText(shown)}`
-    : undefined;
-  return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}), ...(problem && lost ? { lost: true } : {}) };
+    : missing;
+  return { url: requested, checkedAt: new Date().toISOString(), ok: !problem, ...(status ? { status } : {}), ...(finalUrl !== requested ? { finalUrl } : {}), title: title.slice(0, 200), ...(expect ? { expect, found } : {}), ...(highlight ? { highlight } : {}), ...(problem ? { problem } : {}), ...(missing && problem === missing && lost ? { lost: true } : {}) };
 }
 
 /** How a page answered, for the step in which it loaded. */

@@ -1,7 +1,10 @@
 import type { CDPSession, Page } from "puppeteer-core";
 import type { PageShot, PageStep, PageStepName } from "../../../shared/types.js";
-import { lookAt, type PageLook } from "./look.js";
+import { inTime, lookAt, type PageLook } from "./look.js";
 import { readable } from "./verify.js";
+
+/** Notes walk through the whole page, which takes longer on a large one. */
+const NOTES_MS = 2000;
 
 /** A step of a run, with its picture still in memory. */
 export type TracedStep = Omit<PageStep, "picture" | "text"> & PageLook;
@@ -13,12 +16,15 @@ export class PageTrace {
   url = "";
   /** A page that produces no picture in time would hold up every later step, so the steps after it go without one. */
   private pictures = true;
+  /** A page that doesn't answer at all isn't asked again until the run fails. */
+  private hangs = false;
 
   constructor(private shot: Pick<PageShot, "expect" | "highlight">) {}
 
   start() {
     this.steps = [];
     this.pictures = true;
+    this.hangs = false;
   }
 
   add(name: PageStepName, look: PageLook, notes: string[] = []) {
@@ -35,10 +41,16 @@ export class PageTrace {
   }
 
   async step(page: Page, name: PageStepName, notes: string[] = []) {
+    if (this.hangs) return;
     const look = await lookAt(page, undefined, this.pictures);
-    if (!look) return;
+    if (!look) { this.hangs = true; return; }
     if (!look.picture) this.pictures = false;
     this.add(name, look, notes);
+  }
+
+  /** Notes about the page, or none when it doesn't answer soon. */
+  async notes(ask: () => Promise<string[]>): Promise<string[]> {
+    return (!this.hangs && (await inTime(ask(), Date.now() + NOTES_MS))) || [];
   }
 
   /** The moment a run failed. The run shows nothing when the page didn't load. */
