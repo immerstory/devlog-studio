@@ -434,17 +434,19 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           await capturePost(paged.id, "portrait", () => {}, undefined, views);
           const filmed = (await pageChecks(await loaded(), "portrait")).views["seg-page"];
           assert.equal(filmed.by, "capture");
-          assert.equal(filmed.text, "Continue to Example");
+          assert.equal((await pageView(of))?.steps?.at(-1)?.text, "Continue to Example");
           assert.equal(filmed.problem, (await loaded()).scripts.portrait!.segments[0].captureError, "the view and the shot name the same problem");
-          assert.deepEqual([...pictures.keys()], [filmed.picture]);
+          assert.deepEqual(filmed.steps!.map((s) => s.name), ["loaded", "failed"]);
+          assert.deepEqual([...pictures.keys()], filmed.steps!.map((s) => s.picture));
+          assert.equal(filmed.picture, filmed.steps!.at(-1)!.picture, "the view shows its last step");
           body = "<title>Example Film</title><p>Example Film</p>";
           await checkPostLinks(await loaded(), "portrait", () => {}, views);
-          assert.deepEqual(await pageView(of), filmed, "a check that passes keeps the view of a failed capture");
+          assert.deepEqual((await pageView(of))?.picture, filmed.picture, "a check that passes keeps the view of a failed capture");
           body = "<title>Ad</title><p>Another ad</p>";
           await checkPostLinks(await loaded(), "portrait", () => {}, views);
           const checked = (await pageView(of))!;
-          assert.deepEqual([checked.by, checked.text], ["check", "Another ad"], "a failed check replaces the view");
-          assert.deepEqual([...pictures.keys()], [checked.picture], "and its picture replaces the one before");
+          assert.deepEqual([checked.by, checked.steps?.at(-1)?.text], ["check", "Another ad"], "a failed check replaces the view");
+          assert.deepEqual([...pictures.keys()], checked.steps!.map((s) => s.picture), "and its pictures replace the ones before");
           const moved = structuredClone(await loaded());
           (moved.scripts.portrait!.segments[0].visual as { shot: { url: string } }).shot.url = `${url}/2`;
           assert.deepEqual((await pageChecks(moved, "portrait")).views, {}, "a view of another address isn't shown");
@@ -454,11 +456,44 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
           assert.equal(pictures.size, 0);
           body = "<title>Ad</title><p>Third ad</p>";
           await capturePost(paged.id, "portrait", () => {}, undefined, views);
-          assert.equal((await pageView(of))?.text, "Third ad");
+          assert.equal((await pageView(of))?.steps?.at(-1)?.text, "Third ad");
+          const { previewPage } = await import("../server/pipeline.js");
+          await previewPage(paged.id, "portrait", "seg-page", () => {}, views);
+          const previewed = (await pageView(of))!;
+          assert.deepEqual([previewed.by, previewed.problem, previewed.url], ["preview", (await loaded()).scripts.portrait!.segments[0].captureError, url], "a preview names the problem of a capture");
+          body = "<title>Example Film</title><p>Example Film</p>";
+          await previewPage(paged.id, "portrait", "seg-page", () => {}, views);
+          const passed = (await pageView(of))!;
+          assert.equal(passed.problem, undefined);
+          assert.deepEqual(passed.steps!.map((s) => [s.name, s.text]), [["loaded", "Example Film"], ["start", "Example Film"]]);
+          assert.deepEqual([...pictures.keys()].sort(), passed.steps!.map((s) => s.picture).sort(), "a view keeps the pictures of its steps and no others");
+          const listed = (await pageChecks(await loaded(), "portrait")).views["seg-page"];
+          assert.deepEqual(listed.steps!.map((s) => [s.name, s.text, s.picture]), passed.steps!.map((s) => [s.name, undefined, s.picture]), "a list of views leaves out the text of the steps");
+          await checkPostLinks(await loaded(), "portrait", () => {}, views);
+          assert.deepEqual(await pageView(of), passed, "a check that passes keeps a preview");
+          await capturePost(paged.id, "portrait", () => {}, undefined, views);
+          assert.deepEqual(await pageView(of), passed, "a capture without a failure keeps a preview");
+          await capturePost(paged.id, "portrait", () => {}, undefined, { ...views, putFile: async () => { throw new Error("storage is down"); } });
+          assert.equal((await loaded()).scripts.portrait!.segments[0].captureError, "storage is down");
+          assert.deepEqual(await pageView(of), passed, "a capture that fails after the page was filmed keeps a preview");
+          assert.equal(listed.text, undefined);
+          const { startJob, getJob } = await import("../server/jobs.js");
+          let finish!: () => void;
+          const job = await startJob("preview", `${paged.id}:seg-page`, () => new Promise<void>((r) => { finish = r; }));
+          assert.notEqual((await startJob("preview", `${paged.id}:seg-other`, async () => {})).id, job.id, "two shots are previewed at the same time");
+          await assert.rejects(revertPost(paged.id, async () => {}), /running job/, "a post with a running preview can't be reverted");
+          finish();
+          while (getJob(job.id)!.status === "running") await new Promise((r) => setTimeout(r, 20));
+          takes.clear();
+          await assert.rejects(previewPage(paged.id, "portrait", "missing", () => {}, views), /Only a webpage shot/);
           const good = "<title>Example Film</title><p>Example Film</p>", bad = "<title>Ad</title><p>Ad</p>";
+          const textOf = async () => (await pageView(of))?.steps?.at(-1)?.text;
           const capture = async (page: string) => { body = page; await capturePost(paged.id, "portrait", () => {}, undefined, views); };
+          await store.updatePost(project.id, paged.id, (p) => { delete p.scripts.portrait!.segments[0].takes; delete p.scripts.portrait!.segments[0].media; });
+          body = bad;
+          await previewPage(paged.id, "portrait", "seg-page", () => {}, views);
           await capture(good);
-          assert.equal(await pageView(of), undefined, "a capture without a failure clears the view");
+          assert.equal(await pageView(of), undefined, "a capture without a failure clears the view of a failed run");
           assert.deepEqual([pictures.size, takes.size], [0, 1]);
           await capture(good);
           await capture(good);
@@ -474,27 +509,38 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
 
           const down = { ...views, putBuffer: async () => { throw new Error("storage is down"); } };
           await checkPostLinks(await loaded(), "portrait", () => {}, down);
-          assert.deepEqual([(await pageView(of))?.text, (await pageView(of))?.picture, pictures.size], ["Ad", undefined, 0], "without storage a view keeps its text");
+          assert.deepEqual([await textOf(), (await pageView(of))?.picture, pictures.size], ["Ad", undefined, 0], "without storage a view keeps its text");
           const lines: string[] = [];
           const broken = { ...views, putBuffer: () => { throw new Error("broken"); } };
           assert.deepEqual(await checkPostLinks(await loaded(), "portrait", (l) => lines.push(l), broken), { checked: 1, failed: 1 }, "a view that can't be kept doesn't stop the checks");
           assert.ok(lines.some((l) => /wasn't kept: broken/.test(l)));
 
           // Tasks of one post that change a view at once: all pictures are uploaded before the first view is stored.
-          const look = (text: string) => ({ pageUrl: url, title: "", text, picture: Buffer.from(text) });
+          const { PageTrace } = await import("../server/capture/browser/trace.js");
+          const look = (text: string) => {
+            const trace = new PageTrace({});
+            for (const name of ["loaded", "failed"] as const) trace.add(name, { pageUrl: url, title: "", text, picture: Buffer.from(text) });
+            return trace;
+          };
+          const keptPictures = async () => (await pageView(of))!.steps!.map((s) => s.picture).sort();
           let uploads = 0, open!: () => void;
           const gate = new Promise<void>((r) => { open = r; });
           const slow = { ...views, putBuffer: async (key: string, picture: Buffer) => { pictures.set(key, picture); if (++uploads === 4) open(); await gate; } };
           const run = { url, by: "check" as const, problem: "p" };
           await savePageView(of, run, look("before"), views);
           await Promise.all(["a", "b", "c", "d"].map((t) => savePageView(of, run, look(t), slow)));
-          assert.deepEqual([...pictures.keys()], [(await pageView(of))!.picture], "only the stored view's picture stays");
+          assert.deepEqual([...pictures.keys()].sort(), await keptPictures(), "only the stored view's pictures stay");
           for (let i = 0; i < 20; i++) {
             await savePageView(of, run, look("check"), views);
             await Promise.all([savePageView(of, { ...run, by: "capture" }, look("capture"), views), clearPageView(of, (v) => v.by === "check", views)]);
             assert.equal((await pageView(of))?.by, "capture", "a check that passes never clears the view a capture stores meanwhile");
           }
-          assert.deepEqual([...pictures.keys()], [(await pageView(of))!.picture]);
+          for (let i = 0; i < 20; i++) {
+            await savePageView(of, run, look("failed"), views);
+            await Promise.all([savePageView(of, { url, by: "preview" }, look("preview"), views), clearPageView(of, (v) => !!v.problem, views), savePageView(of, { ...run, by: "capture" }, look("capture"), views)]);
+            assert.deepEqual([...pictures.keys()].sort(), (await pageView(of))?.steps?.map((s) => s.picture).sort() ?? [], "three tasks at once leave no picture behind");
+          }
+          assert.deepEqual([...pictures.keys()].sort(), await keptPictures().catch(() => []));
 
           await store.updatePost(project.id, paged.id, (p) => { (p.scripts.portrait!.segments[0].visual as { shot: { url: string } }).shot.url = `${url}/2`; });
           body = good;
@@ -507,7 +553,7 @@ test("project migrations, ownership and deletion recovery", { skip: !process.env
 
           await store.updatePost(project.id, paged.id, (p) => { p.scripts.portrait = structuredClone(script) as import("../shared/types.js").Script; });
           await capture(bad);
-          assert.equal(pictures.size, 1);
+          assert.ok(pictures.size > 0);
           await revertPost(paged.id, async (prefix) => { for (const key of [...pictures.keys()]) if (key.startsWith(prefix)) pictures.delete(key); });
           assert.deepEqual([await pageView(of), pictures.size], [undefined, 0], "a reverted post keeps no views, and its pictures go with its files");
         });

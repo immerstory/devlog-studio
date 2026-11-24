@@ -451,7 +451,7 @@ function SegmentEditor(props: {
   onPreviousTake: () => Promise<void>;
   /** The latest check of a webpage shot's page. */
   pageCheck?: PageCheck | null;
-  /** What the browser saw when a webpage shot last failed. */
+  /** What the browser saw when a webpage shot last failed or was previewed. */
   pageView?: PageView;
   /** The feed entries behind the post don't name this source shot's link. */
   linkUnlisted?: boolean;
@@ -604,7 +604,11 @@ function SegmentEditor(props: {
           </>
         ) : null}
         {v.type === "capture" && v.model === "page" ? (
-          <PageShotFields shot={v} format={format} check={pageCheck} view={pageView} unlisted={linkUnlisted} onChange={(shot) => setVisual({ ...v, ...shot })}>
+          <PageShotFields shot={v} format={format} check={pageCheck} view={pageView} loadView={() => api<PageView | null>(`/api/posts/${ep.id}/segments/${seg.id}/page-view/${format}`)} unlisted={linkUnlisted} onChange={(shot) => setVisual({ ...v, ...shot })}>
+            <Button variant="outline" disabled={busy} title="Opens the page with these settings, without filming it, and shows what the browser sees at each step" onClick={() => { onStart("preview"); run(`/api/posts/${ep.id}/segments/${seg.id}/page-preview/${format}`); }}>
+              {pending === "preview" ? <Spinner /> : null}
+              {pending === "preview" ? "Opening…" : "Preview"}
+            </Button>
             <Button variant="outline" disabled={busy} onClick={() => { onStart("recapture"); run(`/api/posts/${ep.id}/capture/${format}`, { segmentId: seg.id }); }}>
               {pending === "recapture" ? <Spinner /> : null}
               {pending === "recapture" ? "Filming…" : media ? "Film again" : "Film page"}

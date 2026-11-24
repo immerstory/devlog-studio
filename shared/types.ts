@@ -357,19 +357,46 @@ export interface PageCheck {
   lost?: boolean;
 }
 
-/** What the browser saw when a webpage shot failed. Each shot keeps the one of its latest failure, for its editor. */
+/**
+ * A moment of a run that opens a webpage shot's page: the page loaded, the cookie choice was made, notices, ads and
+ * the elements under Hide were hidden, the shot's CSS and script ran, the first and the last frame, and the failure.
+ */
+export type PageStepName = "loaded" | "cookies" | "hidden" | "styled" | "start" | "end" | "failed";
+
+/** The page as the browser saw it at one step. */
+export interface PageStep {
+  name: PageStepName;
+  /** The address the browser was at. */
+  pageUrl: string;
+  title: string;
+  /** The text a reader of the page could see, shortened when very long. Left out of lists of views. */
+  text?: string;
+  /** Storage key of a picture of the browser's view. Absent when the page produced none. */
+  picture?: string;
+  /** What the app did to the page in this step, such as which button it clicked and what it hid. */
+  notes: string[];
+  /** The page showed the expected text. Absent when the shot expects none. */
+  found?: boolean;
+  /** The page showed the sentence to highlight. Absent when the shot has none. */
+  highlightFound?: boolean;
+}
+
+/** What the browser saw when a webpage shot last failed or was previewed. Each shot keeps one, for its editor. */
 export interface PageView {
   /** The address the shot asks for, which tells a view of an earlier address apart. */
   url: string;
   at: string;
-  /** The run that failed: filming the shot, or a check of its link. */
-  by: "capture" | "check";
-  problem: string;
+  /** The run: filming the shot, a check of its link, or a preview. */
+  by: "capture" | "check" | "preview";
+  /** Why the run failed. Only a preview can be without one. */
+  problem?: string;
+  /** The steps of the run. The last one is what the fields below show. */
+  steps?: PageStep[];
   /** The address the browser was at. */
   pageUrl: string;
   title: string;
-  /** The text a reader of the page could see, shortened when very long. */
-  text: string;
+  /** The text of a view without steps. */
+  text?: string;
   /** Storage key of a picture of the browser's view. Absent when the page produced none. */
   picture?: string;
 }

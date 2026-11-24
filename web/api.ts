@@ -50,6 +50,8 @@ export async function api<T = unknown>(url: string, method = "GET", body?: unkno
   return data as T;
 }
 
+export const shortTime = (at: string) => new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
 /** Polls a job until it finishes, then calls onDone. */
 export function useJob(onDone?: (job: Job) => void) {
   const [job, setJob] = useState<Job | null>(null);

@@ -6,8 +6,8 @@ import { getProject } from "../../projects.js";
 import { getSuggestions, getValue, loadPost, setValue } from "../../store.js";
 import { pageUrl } from "./index.js";
 import { checkPage, isSourceShot } from "./verify.js";
-import { clearPageView, dropPageViews, pageView, savePageView, type ViewIO } from "./views.js";
-import type { PageLook } from "./look.js";
+import { clearPageView, dropPageViews, pageView, savePageView, viewSummary, type ViewIO } from "./views.js";
+import { PageTrace } from "./trace.js";
 import { feedTexts, textNamesLink } from "../../ingress/feeds.js";
 
 /** One check per page and the texts it looked for, so two shots of one page with different sentences keep their own. */
@@ -45,7 +45,7 @@ async function unlistedShots(post: Post, shots: ReturnType<typeof pageShots>): P
 export interface PageChecks {
   /** The latest check of each webpage shot, by segment. */
   checks: Record<string, PageCheck | null>;
-  /** What the browser saw at each shot's latest failure, by segment. */
+  /** What the browser saw when each shot last failed or was previewed, by segment, without the text of the steps. */
   views: Record<string, PageView>;
   /** Source shots whose link the feed doesn't name. */
   unlisted: string[];
@@ -59,7 +59,7 @@ export async function pageChecks(post: Post, format: keyof Post["scripts"]): Pro
   for (const shot of shots) {
     checks[shot.segmentId] = (await getValue<PageCheck>(projectId(), key(shot.url, shot.shot.expect, shot.shot.highlight))) ?? null;
     const view = await pageView({ postId: post.id, format, segmentId: shot.segmentId });
-    if (view?.url === shot.url) views[shot.segmentId] = view;
+    if (view?.url === shot.url) views[shot.segmentId] = viewSummary(view);
   }
   return { checks, views, unlisted: [...await unlistedShots(post, shots)] };
 }
@@ -83,12 +83,12 @@ export async function checkPostLinks(post: Post, format: keyof Post["scripts"], 
     throwIfCancelled();
     log(`Segment ${s.index + 1}: ${s.url}`);
     const of = { postId: post.id, format, segmentId: s.segmentId };
-    let look: PageLook | undefined;
-    const check = await checkPage(s.url, s.shot, { onLook: (seen) => { look = seen; }, userAgent: s.target.userAgent, headers: parseHeaders(s.target.headers ?? DEFAULT_PAGE_HEADERS), device: s.device, log: (line) => log(`  ${line}`) });
+    const trace = new PageTrace(s.shot);
+    const check = await checkPage(s.url, s.shot, { trace, userAgent: s.target.userAgent, headers: parseHeaders(s.target.headers ?? DEFAULT_PAGE_HEADERS), device: s.device, log: (line) => log(`  ${line}`) });
     await savePageCheck(check);
     // A check that passes says nothing about a shot that failed while it was filmed.
-    await (check.problem && look
-      ? savePageView(of, { url: s.url, by: "check", problem: check.problem }, look, views)
+    await (check.problem && trace.failed
+      ? savePageView(of, { url: s.url, by: "check", problem: check.problem }, trace, views)
       : clearPageView(of, (view) => view.by === "check", views)
     ).catch(unkept);
     if (check.ok) log(`  OK${check.title ? `: “${check.title}”` : ""}`);
