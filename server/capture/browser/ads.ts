@@ -8,12 +8,18 @@ export const AD_URLS = [
   "revcontent.com", "zergnet.com", "nativo.com", "adsrvr.org", "indexww.com", "bidswitch.net", "ad.plus", "adition.com", "stroeer", "uimserv.net",
 ].map((domain) => `*${domain}*`);
 
-/** Slots and widgets of ads that are left in the page after their requests are blocked. */
+/**
+ * Slots and widgets of ads that are left in the page after their requests are blocked. Some sites mark the body or a
+ * wrapper of the whole page with ad attributes or classes such as `data-ad-unit`, so a rule matches only inside the
+ * body, never the main region, and no element that holds the main region or an `h1`. Articles don't count, because
+ * native ads and recommendation widgets build their cards from them. The scoping sits in `:where()`, which adds no
+ * specificity: custom CSS with the same selector still overrides a rule.
+ */
 export const AD_CSS = [
   "ins.adsbygoogle", "[id^='div-gpt-ad']", "[id^='google_ads_iframe']", "[data-ad-slot]", "[data-ad-unit]", "[data-google-query-id]",
   "[aria-label='Advertisement' i]", "[aria-label='Anzeige' i]", "[class*='taboola' i]", "[id*='taboola' i]", "[class*='outbrain' i]", "[id*='outbrain' i]",
   ".ad-container", ".ad-slot", ".ad-wrapper", ".advert", ".advertisement", ".adsbox", "iframe[src*='ads']",
-].map((selector) => `${selector} { display: none !important; }`).join("\n");
+].map((selector) => `:where(body) ${selector}:where(:not(main, :has(h1, main))) { display: none !important; }`).join("\n");
 
 /** Blocks ad networks for the page's requests. Call it before the page loads. */
 export async function blockAds(page: Page) {
