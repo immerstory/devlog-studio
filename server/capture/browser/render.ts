@@ -79,8 +79,8 @@ export interface PageSession {
   run<T>(expression: string): Promise<T>;
   /** Advances page time by `ms` and saves a screenshot of the frame at the video's resolution. */
   frame(f: PageFrame, ms: number, file: string): Promise<void>;
-  /** Plays the page for `ms` at a scroll position without taking a frame: page time, or real time for a real-time session. */
-  play(scrollY: number, ms: number): Promise<void>;
+  /** Plays the page for `ms` at a scroll position without keeping a frame: page time, or real time for a real-time session. `draw` makes Chrome draw it. */
+  play(scrollY: number, ms: number, draw: boolean): Promise<void>;
   /** What the page shows now and where it is scrolled to, without a picture. The clock stays paused. */
   read(): Promise<PageLook & { scrollY: number }>;
   /** Records the failure of the session's run. The page's clock runs on from here, so nothing is filmed afterwards. */
@@ -282,18 +282,38 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
       await expired;
     };
 
-    const scrollTo = (y: number) => run(`window.scrollTo(0, ${Number(y) || 0})`);
-    const play = async (scrollY: number, ms: number) => {
-      await scrollTo(scrollY);
-      if (opts.realtime) return void (await new Promise((r) => setTimeout(r, ms)));
-      await advance(ms);
-      await run(`window.__devlogStep(${ms})`);
-    };
-
     let lastFrame: Buffer | undefined;
     let stuck = 0;
     let repeated = 0;
     let released = 0;
+    const scrollTo = (y: number) => run(`window.scrollTo(0, ${Number(y) || 0})`);
+    /** Moves to a scroll position and, unless the page is on its own clock, plays it for `ms`. */
+    const move = async (scrollY: number, ms: number) => {
+      await scrollTo(scrollY);
+      if (opts.realtime) return;
+      await advance(ms);
+      await run(`window.__devlogStep(${ms})`);
+    };
+    /**
+     * A picture of a part of the document, or null when the page produces none in time. On some pages Chrome stops
+     * producing pictures while page time is paused, and the screenshot waits forever. Letting page time run freely
+     * releases it; CSS animations and videos keep their exact timing because each frame sets them, only script-driven
+     * effects may jump at that frame.
+     */
+    const picture = async (format: "png" | "jpeg", clip: { x: number; y: number; width: number; height: number; scale: number }) => {
+      const request = cdp.send("Page.captureScreenshot", { format, clip, captureBeyondViewport: false });
+      request.catch(() => {});
+      const within = (ms: number) => Promise.race([request, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
+      let shot = await within(1500);
+      if (!shot && !opts.realtime) {
+        await cdp.send("Emulation.setVirtualTimePolicy", { policy: "advance" });
+        shot = await within(lastFrame ? 5000 : 20_000);
+        await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
+        if (shot) released++;
+      }
+      return shot;
+    };
+
     return {
       page,
       cdp,
@@ -310,7 +330,7 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
         return Math.max(0, y);
       },
       async frame(f, ms, file) {
-        await (opts.realtime ? scrollTo(f.scrollY) : play(f.scrollY, ms));
+        await move(f.scrollY, ms);
         const zoom = Math.max(1, f.zoom);
         const w = opts.output.width / scale / zoom;
         const h = opts.output.height / scale / zoom;
@@ -319,22 +339,10 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
         // Clip coordinates are document coordinates in CSS pixels; the scale renders the region at the
         // video's resolution (the clip scale does not include the device scale factor).
         const scroll = await run<{ x: number; y: number }>("({ x: window.scrollX, y: window.scrollY })");
-        // On some pages Chrome stops producing pictures while page time is paused, and the screenshot waits
-        // forever. Letting page time run freely releases it; CSS animations and videos keep their exact
-        // timing because each frame sets them, only script-driven effects may jump at that frame. If even
-        // that does not help, the frame repeats the previous picture, and a page that stays stuck fails.
+        // Without a picture, the frame repeats the previous one, and a page that stays stuck fails.
         const raster = f.rasterZoom !== undefined && f.rasterZoom > 1 ? Math.max(zoom, f.rasterZoom) : undefined;
         const clip = raster ? { x: scroll.x, y: scroll.y, width, height, scale: raster * scale } : { x: scroll.x + x, y: scroll.y + y, width: w, height: h, scale: zoom * scale };
-        const request = cdp.send("Page.captureScreenshot", { format: "png", clip, captureBeyondViewport: false });
-        request.catch(() => {});
-        const within = (ms: number) => Promise.race([request, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
-        let shot = await within(1500);
-        if (!shot && !opts.realtime) {
-          await cdp.send("Emulation.setVirtualTimePolicy", { policy: "advance" });
-          shot = await within(lastFrame ? 5000 : 20_000);
-          await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
-          if (shot) released++;
-        }
+        const shot = await picture("png", clip);
         let image: Buffer;
         if (shot) {
           image = Buffer.from(shot.data, "base64");
@@ -350,7 +358,15 @@ async function openPageOnce(opts: OpenPageOptions): Promise<PageSession> {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, image);
       },
-      play,
+      async play(scrollY, ms, draw) {
+        await move(scrollY, ms);
+        if (opts.realtime) await new Promise((r) => setTimeout(r, ms));
+        if (!draw) return;
+        // Chrome draws a frame only for a picture while the clock is paused, and content that loads when it comes into
+        // view waits for a drawn frame. One pixel is enough to draw the whole frame.
+        const scroll = await run<{ x: number; y: number }>("({ x: window.scrollX, y: window.scrollY })");
+        await picture("jpeg", { ...scroll, width: 1, height: 1, scale: 1 });
+      },
       async read() {
         const now = await inTime(run<{ title: string; text: string; scrollY: number }>(`({ ...${PAGE_TEXT}, scrollY: window.scrollY })`), Date.now() + 5000);
         if (!now) throw new Error("The page stopped answering.");

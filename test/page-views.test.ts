@@ -285,21 +285,31 @@ describe("page views", { concurrency: 4 }, () => {
   test("a note that takes long is left out, and the others stay", async () => {
     const { hiddenNotes } = await import("../server/capture/browser/hidden.js");
     const page = fakePage(async (expression) => (expression.includes('data-devlog="ads"') ? never() : expression.includes('data-devlog="hide"') ? [2] : ["div#cookies"]), never);
+    const started = Date.now();
     assert.deepEqual(await hiddenNotes(page, [".promo"]), ["Hid notices and messages: div#cookies", "Hide “.promo” matches 2 elements"]);
+    assert.ok(Date.now() - started < 20_000, `${Date.now() - started} ms`);
   });
 
   test("a preview takes its frames from the same path as a capture and plays the page in between", async () => {
-    pages["/timer"] = `<!doctype html><title>Timer</title><div style="height:3000px"></div><p id="late"></p><script>setTimeout(() => { document.getElementById("late").textContent = "Later text"; }, 1500);</script>`;
+    // Counts page time, shows an element only once it was on screen, and opens a notice after a second.
+    pages["/timer"] = `<!doctype html><title>Timer</title><p id="count">0</p><div style="height:3000px"></div><p id="seen" style="height:400px"></p><div style="height:3000px"></div><script>
+      let n = 0; setInterval(() => { document.getElementById("count").textContent = ++n; }, 50);
+      new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) document.getElementById("seen").textContent = "Seen on the way"; }).observe(document.getElementById("seen"));
+      setTimeout(() => document.body.insertAdjacentHTML("beforeend", '<div role="dialog" aria-modal="true" style="position:fixed;inset:20%">Take our survey</div>'), 1000);
+    </script>`;
     const { shotPath } = await import("../server/capture/browser/index.js");
     const fake = { run: async <T>() => 0 as T, scrollOf: async (v: number | string) => Number(v) };
     const shown = await shotPath(fake, { ...newPageShot("/"), scrollTo: 900, zoomFrom: 1, zoomTo: 2 }, { frames: 61, fps: 30 });
     assert.deepEqual([shown.frames, shown.seconds, await shown.frame(0), await shown.frame(60)], [61, 2, { scrollY: 0, zoom: 1, focusX: 0.5, focusY: 0.5, rasterZoom: 2 }, { scrollY: 900, zoom: 2, focusX: 0.5, focusY: 0.5, rasterZoom: 2 }]);
     await serving(async (base) => {
-      const preview = (realtime: boolean) => previewShot({ baseUrl: base }, { ...newPageShot("/timer"), scrollTo: 500, settleMs: 0, realtime }, "landscape", { frames: 90, fps: 30 }, () => {}, async () => {});
+      const preview = (realtime: boolean) => previewShot({ baseUrl: base }, { ...newPageShot("/timer"), scrollTo: 5500, settleMs: 0, realtime }, "landscape", { frames: 16, fps: 5 }, () => {}, async () => {});
       for (const { trace, problem } of await Promise.all([preview(false), preview(true)])) {
         assert.equal(problem, undefined);
         assert.deepEqual(trace.steps.map((s) => s.name), ["loaded", "start", "end"]);
-        assert.equal(trace.steps.at(-1)!.text, "Later text", "the page plays for the whole shot");
+        const counts = trace.steps.slice(1).map((s) => parseInt(s.text, 10));
+        assert.ok(counts[1] - counts[0] >= 40, `the page plays for the three seconds of the shot: ${counts.join(" to ")}`);
+        assert.match(trace.steps.at(-1)!.text, /Seen on the way/, "content that shows up on the way is on the page");
+        assert.doesNotMatch(trace.steps.at(-1)!.text, /survey/, "a notice that opens on the way is hidden");
       }
     });
   });
